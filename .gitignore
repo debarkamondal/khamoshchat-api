@@ -1,0 +1,9 @@
+#Environment files
+.env
+.env.local
+
+#Build directories
+target/
+
+#Cargo.lock
+Cargo.lock
