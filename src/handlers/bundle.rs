@@ -81,7 +81,10 @@ pub async fn get_bundle(
         .set_request_items(Some(request_items))
         .send()
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to batch get items from DynamoDB");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        })?;
 
     let responses = batch_result.responses.unwrap_or_default();
     let items = responses
@@ -97,10 +100,13 @@ pub async fn get_bundle(
         .iter()
         .find(|item| item.get("sk").and_then(|v| v.as_s().ok()) == Some(&requested_phone));
 
-    let requester_item = requester_item.ok_or((
-        StatusCode::NOT_FOUND,
-        "Requester not found".into(),
-    ))?;
+    let requester_item = requester_item.ok_or_else(|| {
+        tracing::warn!(requester_phone = %req.phone, "Requester not found in database");
+        (
+            StatusCode::NOT_FOUND,
+            "Requester not found".into(),
+        )
+    })?;
 
     // ── Signature verification ──
     let signed_prekey = requester_item
@@ -129,19 +135,24 @@ pub async fn get_bundle(
     match vxeddsa_verify(&signed_prekey_bytes, requested_phone.as_bytes(), &signature_bytes) {
         Some(output) => {
             if output != vrf_bytes {
+                tracing::warn!(requester_phone = %req.phone, requested_phone = %requested_phone, "VRF mismatch");
                 return Err((StatusCode::UNAUTHORIZED, "VRF mismatch".into()));
             }
         }
         None => {
+            tracing::warn!(requester_phone = %req.phone, requested_phone = %requested_phone, "Invalid signature verification");
             return Err((StatusCode::UNAUTHORIZED, "Invalid signature".into()));
         }
     }
 
     // ── Return requested user's bundle ──
-    let item = requested_item.ok_or((
-        StatusCode::NOT_FOUND,
-        "Requested user not found".into(),
-    ))?;
+    let item = requested_item.ok_or_else(|| {
+        tracing::warn!(requested_phone = %requested_phone, "Requested user not found in database");
+        (
+            StatusCode::NOT_FOUND,
+            "Requested user not found".into(),
+        )
+    })?;
 
     let identity_key = item
         .get("lsi")

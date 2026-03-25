@@ -53,7 +53,10 @@ pub async fn register_phone(
     let mut conn = state.redis.clone();
     conn.set_ex::<_, _, ()>(&redis_key, &value, REGISTRATION_TTL_SECS)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Redis error: {e}")))?;
+        .map_err(|e| {
+            tracing::error!(phone = %req.phone, error = %e, "Failed to store registration data in Redis");
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Redis error: {e}"))
+        })?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -72,7 +75,10 @@ pub async fn verify_otp(
     let stored: Option<String> = conn
         .get(&redis_key)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Redis error: {e}")))?;
+        .map_err(|e| {
+            tracing::error!(phone = %req.phone, error = %e, "Failed to retrieve registration data from Redis");
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Redis error: {e}"))
+        })?;
 
     let stored = stored.ok_or((StatusCode::NOT_FOUND, "Registration not found or expired".into()))?;
 
@@ -85,6 +91,7 @@ pub async fn verify_otp(
         .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Missing OTP in store".into()))?;
 
     if stored_otp != req.otp as u64 {
+        tracing::warn!(phone = %req.phone, provided_otp = req.otp, stored_otp = stored_otp, "OTP mismatch");
         return Err((StatusCode::FORBIDDEN, "OTP mismatch".into()));
     }
 
@@ -189,7 +196,10 @@ pub async fn verify_otp(
     let _: () = conn
         .del(&redis_key)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Redis cleanup error: {e}")))?;
+        .map_err(|e| {
+            tracing::error!(phone = %req.phone, error = %e, "Failed to clean up registration data from Redis");
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Redis cleanup error: {e}"))
+        })?;
 
     Ok(StatusCode::NO_CONTENT)
 }

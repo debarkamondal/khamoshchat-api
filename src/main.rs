@@ -6,6 +6,7 @@ use axum::{
     Router,
 };
 use state::AppState;
+use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -15,7 +16,7 @@ async fn main() {
 
     // Initialise tracing
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,tower_http=debug")))
         .init();
 
     // Build shared state
@@ -36,6 +37,7 @@ async fn main() {
             "/register/google_oauth/id_token",
             post(handlers::google_oauth::google_oauth_id_token),
         )
+        .layer(TraceLayer::new_for_http())
         .with_state(state);
 
     // Start server
