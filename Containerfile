@@ -36,15 +36,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root user
-RUN groupadd --system app && useradd --system --gid app --create-home app
+RUN groupadd --system rocky && useradd --system --gid rocky --create-home rocky
 
 WORKDIR /app
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/target/release/khamoshchat-api /app/khamoshchat-api
 
-RUN chown -R app:app /app
-USER app
+RUN chown -R rocky:rocky /app
+USER rocky
 
 # Expose the API port
 EXPOSE 3000
