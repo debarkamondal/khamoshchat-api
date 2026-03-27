@@ -35,8 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root user
-RUN groupadd --system rocky && useradd --system --gid rocky --create-home rocky
+# Non-root user (UID/GID 1000 to match host rocky user for keep-id)
+RUN groupadd --gid 1000 rocky && useradd --uid 1000 --gid 1000 --create-home rocky
 
 WORKDIR /app
 
