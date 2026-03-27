@@ -1,16 +1,15 @@
 # Build Stage
-FROM rust:1-alpine AS builder
+FROM rust:1-slim-bookworm AS builder
 
 # Install build dependencies
-RUN apk add --no-cache \
-    musl-dev \
-    openssl-dev \
-    openssl-libs-static \
-    pkgconfig \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl-dev \
+    pkg-config \
     git \
     cmake \
     make \
-    perl
+    perl \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
