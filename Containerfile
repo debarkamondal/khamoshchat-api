@@ -24,17 +24,20 @@ COPY . .
 RUN touch src/main.rs && cargo build --release
 
 # Runtime Stage
-FROM alpine:3
+FROM debian:bookworm-slim
 
 # OCI metadata
 LABEL org.opencontainers.image.source="https://github.com/debarkamondal/khamoshchat-api"
 LABEL org.opencontainers.image.description="KhamoshChat API server"
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates libssl3
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Non-root user
-RUN addgroup -S app && adduser -S app -G app
+RUN groupadd --system app && useradd --system --gid app --create-home app
 
 WORKDIR /app
 
