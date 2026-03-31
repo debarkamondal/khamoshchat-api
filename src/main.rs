@@ -37,6 +37,7 @@ async fn main() {
             "/register/google_oauth/id_token",
             post(handlers::google_oauth::google_oauth_id_token),
         )
+        .route("/register/device/fcm", post(handlers::device::register_fcm_token))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
