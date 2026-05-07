@@ -1,12 +1,36 @@
 services:
-  api:
-    build:
-      context: .
-      dockerfile: Containerfile
+  # api:
+  #   build:
+  #     context: .
+  #     dockerfile: Containerfile
+  #   ports:
+  #     - "3000:3000"
+  #     - "3001:3001"
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     - REDIS_URL=redis://redis:6379
+  #   depends_on:
+  #     - redis
+
+  redis:
+    image: redis:latest
     ports:
-      - "3000:3000"
-    env_file:
-      - .env
-    environment:
-      - REDIS_URL=redis://10.0.2.16:6379
-    depends_on: [] # No local dependencies needed anymore
+      - "6379:6379"
+
+  rmqtt:
+    image: docker.io/rmqtt/rmqtt:latest
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./deploy/rmqtt/rmqtt.toml:/app/rmqtt/rmqtt.toml:Z
+      - ./deploy/rmqtt/plugins/rmqtt-session-storage.toml:/app/rmqtt/rmqtt-plugins/rmqtt-session-storage.toml:Z
+      - ./deploy/rmqtt/plugins/rmqtt-message-storage.toml:/app/rmqtt/rmqtt-plugins/rmqtt-message-storage.toml:Z
+      - ./deploy/rmqtt/plugins/rmqtt-web-hook.toml:/app/rmqtt/rmqtt-plugins/rmqtt-web-hook.toml:Z
+      - ./deploy/rmqtt/hook.log:/var/log/rmqtt/hook.log:Z
+    depends_on:
+      - redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+

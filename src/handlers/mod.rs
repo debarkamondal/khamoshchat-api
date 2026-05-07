@@ -1,4 +1,2 @@
-pub mod bundle;
-pub mod google_oauth;
-pub mod register;
-pub mod device;
+pub mod public;
+pub mod private;

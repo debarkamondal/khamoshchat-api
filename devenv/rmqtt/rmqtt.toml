@@ -1,0 +1,49 @@
+##--------------------------------------------------------------------
+## RMQTT Broker Configuration
+##--------------------------------------------------------------------
+
+# Node id
+node.id = 1
+
+# RPC server address
+rpc.server_addr = "0.0.0.0:5363"
+rpc.reuseaddr = true
+rpc.reuseport = false
+
+# Logging
+log.to = "console"
+log.level = "info"
+
+# Plugin configuration file directory (path inside the container)
+plugins.dir = "/app/rmqtt/rmqtt-plugins/"
+
+# Plugins started by default when the MQTT server starts
+plugins.default_startups = [
+    "rmqtt-web-hook",
+    "rmqtt-message-storage",
+    "rmqtt-session-storage",
+]
+
+# MQTT settings
+mqtt.max_sessions = 0
+
+##--------------------------------------------------------------------
+## MQTT/TCP - External TCP Listener
+##--------------------------------------------------------------------
+listener.tcp.external.addr = "0.0.0.0:1883"
+listener.tcp.external.workers = 4
+listener.tcp.external.max_connections = 102400
+listener.tcp.external.max_handshaking_limit = 500
+listener.tcp.external.allow_anonymous = true
+listener.tcp.external.min_keepalive = 0
+listener.tcp.external.max_keepalive = 65535
+listener.tcp.external.keepalive_backoff = 0.75
+listener.tcp.external.max_inflight = 16
+listener.tcp.external.max_mqueue_len = 1000
+listener.tcp.external.max_clientid_len = 65535
+listener.tcp.external.max_qos_allowed = 2
+listener.tcp.external.max_topic_levels = 0
+listener.tcp.external.session_expiry_interval = "2h"
+listener.tcp.external.message_retry_interval = "20s"
+listener.tcp.external.message_expiry_interval = "5m"
+listener.tcp.external.shared_subscription = true

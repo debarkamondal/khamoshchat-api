@@ -1,0 +1,18 @@
+##--------------------------------------------------------------------
+## Hook General Config
+##--------------------------------------------------------------------
+queue_capacity = 300_000
+concurrency_limit = 128
+
+## Default urls, supports http and file protocols
+urls = ["http://host.docker.internal:3001/offline_message"]
+
+## Http config
+http_timeout = "8s"
+retry_max_elapsed_time = "60s"
+retry_multiplier = 2.5
+
+## Hook rules config
+rule.client_connected = [{ action = "client_connected" }]
+rule.client_disconnected = [{ action = "client_disconnected" }]
+rule.offline_message = [{ action = "offline_message" }]

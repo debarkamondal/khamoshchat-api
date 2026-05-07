@@ -16,47 +16,86 @@ async fn main() {
 
     // Initialise tracing
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,tower_http=debug")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info,tower_http=info")),
+        )
         .init();
 
     // Build shared state
     let state = AppState::new().await;
 
-    // Build router
-    let app = Router::new()
+    // Build public router
+    let public_router = Router::new()
         // PreKeyBundle
-        .route("/bundle/{phone}", post(handlers::bundle::get_bundle))
-        .route("/register/phone", post(handlers::register::register_phone))
-        .route("/register/phone/otp", post(handlers::register::verify_otp))
-        .route("/register/google_oauth/init", post(handlers::google_oauth::google_oauth_init))
+        .route(
+            "/bundle/{phone}",
+            post(handlers::public::bundle::get_bundle),
+        )
+        .route(
+            "/register/phone",
+            post(handlers::public::register::register_phone),
+        )
+        .route(
+            "/register/phone/otp",
+            post(handlers::public::register::verify_otp),
+        )
+        .route(
+            "/register/google_oauth/init",
+            post(handlers::public::google_oauth::google_oauth_init),
+        )
         .route(
             "/register/google_oauth/callback",
-            get(handlers::google_oauth::google_oauth_callback),
+            get(handlers::public::google_oauth::google_oauth_callback),
         )
         .route(
             "/register/google_oauth/id_token",
-            post(handlers::google_oauth::google_oauth_id_token),
+            post(handlers::public::google_oauth::google_oauth_id_token),
         )
-        .route("/register/device/fcm", post(handlers::device::register_fcm_token))
+        .route(
+            "/register/device/fcm",
+            post(handlers::public::device::register_fcm_token),
+        )
+        .layer(TraceLayer::new_for_http())
+        .with_state(state.clone());
+
+    // Build private router
+    let private_router = Router::new()
+        .route(
+            "/offline_message",
+            post(handlers::private::offline_message::handle_offline_message),
+        )
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    // Start server
-    let addr = "0.0.0.0:3000";
-    let listener = tokio::net::TcpListener::bind(addr)
+    // Ports
+    let public_port = std::env::var("PUBLIC_API_PORT").unwrap_or_else(|_| "3000".to_string());
+    let private_port = std::env::var("PRIVATE_API_PORT").unwrap_or_else(|_| "3001".to_string());
+
+    let public_addr = format!("0.0.0.0:{}", public_port);
+    let private_addr = format!("0.0.0.0:{}", private_port);
+
+    // Listeners
+    let public_listener = tokio::net::TcpListener::bind(&public_addr)
         .await
-        .expect("Failed to bind to port 3000");
+        .expect(&format!("Failed to bind to public port {}", public_port));
 
-    tracing::info!("Starting KhamoshChat Auth API on {}", addr);
-
-    if let Err(e) = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+    let private_listener = tokio::net::TcpListener::bind(&private_addr)
         .await
-    {
-        tracing::error!("Server error: {}", e);
-    }
+        .expect(&format!("Failed to bind to private port {}", private_port));
 
-    tracing::info!("KhamoshChat Auth API has stopped.");
+    tracing::info!("Starting KhamoshChat public API on {}", public_addr);
+    tracing::info!("Starting KhamoshChat private API on {}", private_addr);
+
+    // Run both servers concurrently
+    let public_server =
+        axum::serve(public_listener, public_router).with_graceful_shutdown(shutdown_signal());
+    let private_server =
+        axum::serve(private_listener, private_router).with_graceful_shutdown(shutdown_signal());
+
+    let _ = tokio::join!(public_server, private_server);
+
+    tracing::info!("KhamoshChat API servers have stopped.");
 }
 
 async fn shutdown_signal() {

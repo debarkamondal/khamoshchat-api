@@ -1,0 +1,13 @@
+##--------------------------------------------------------------------
+## rmqtt-message-storage - Redis Backend
+##--------------------------------------------------------------------
+
+## Storage type: ram, redis, redis-cluster
+storage.type = "redis"
+
+## Redis connection
+storage.redis.url = "redis://redis:6379/"
+storage.redis.prefix = "message-{node}"
+
+## Quantity of expired messages cleared during each cleanup cycle
+cleanup_count = 5000
