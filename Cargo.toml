@@ -24,7 +24,6 @@ redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 
 # Crypto / Signal
 base64 = "0.22"
-rand = "0.8"
 libsignal-dezire = { git = "https://github.com/debarkamondal/libsignal-dezire" }
 
 # HTTP client (Google OAuth token exchange)

@@ -23,11 +23,11 @@ services:
     ports:
       - "1883:1883"
     volumes:
-      - ./deploy/rmqtt/rmqtt.toml:/app/rmqtt/rmqtt.toml:Z
-      - ./deploy/rmqtt/plugins/rmqtt-session-storage.toml:/app/rmqtt/rmqtt-plugins/rmqtt-session-storage.toml:Z
-      - ./deploy/rmqtt/plugins/rmqtt-message-storage.toml:/app/rmqtt/rmqtt-plugins/rmqtt-message-storage.toml:Z
-      - ./deploy/rmqtt/plugins/rmqtt-web-hook.toml:/app/rmqtt/rmqtt-plugins/rmqtt-web-hook.toml:Z
-      - ./deploy/rmqtt/hook.log:/var/log/rmqtt/hook.log:Z
+      - ./devenv/rmqtt/rmqtt.toml:/app/rmqtt/rmqtt.toml:Z
+      - ./devenv/rmqtt/plugins/rmqtt-session-storage.toml:/app/rmqtt/rmqtt-plugins/rmqtt-session-storage.toml:Z
+      - ./devenv/rmqtt/plugins/rmqtt-message-storage.toml:/app/rmqtt/rmqtt-plugins/rmqtt-message-storage.toml:Z
+      - ./devenv/rmqtt/plugins/rmqtt-web-hook.toml:/app/rmqtt/rmqtt-plugins/rmqtt-web-hook.toml:Z
+      - ./devenv/rmqtt/hook.log:/var/log/rmqtt/hook.log:Z
     depends_on:
       - redis
     extra_hosts:
