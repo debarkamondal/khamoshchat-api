@@ -1,4 +1,10 @@
+mod auth;
+mod crypto;
+mod db;
+mod error;
 mod handlers;
+mod models;
+mod push;
 mod state;
 
 use axum::{
@@ -27,34 +33,21 @@ async fn main() {
 
     // Build public router
     let public_router = Router::new()
-        // PreKeyBundle
         .route(
-            "/bundle/{phone}",
+            "/bundle/{identifier}",
             post(handlers::public::bundle::get_bundle),
         )
         .route(
-            "/register/phone",
-            post(handlers::public::register::register_phone),
+            "/register/device",
+            post(handlers::public::device::register_device),
         )
         .route(
-            "/register/phone/otp",
-            post(handlers::public::register::verify_otp),
-        )
-        .route(
-            "/register/google_oauth/init",
-            post(handlers::public::google_oauth::google_oauth_init),
-        )
-        .route(
-            "/register/google_oauth/callback",
-            get(handlers::public::google_oauth::google_oauth_callback),
-        )
-        .route(
-            "/register/google_oauth/id_token",
-            post(handlers::public::google_oauth::google_oauth_id_token),
+            "/register/google/id_token",
+            post(handlers::public::google_oauth::verify_id_token),
         )
         .route(
             "/register/device/fcm",
-            post(handlers::public::device::register_fcm_token),
+            post(handlers::public::device::update_fcm_token),
         )
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
