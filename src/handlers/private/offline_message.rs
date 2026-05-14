@@ -221,37 +221,50 @@ pub async fn handle_offline_message(
     if let WebhookPayload::OfflineMessage { topic, payload: msg_payload, .. } = payload {
         tracing::info!("Received offline message for topic: {}", topic);
 
-        // Extract user_id and device_id from topic (format: "[prefix/...]userId/deviceId")
+        // Topic format: /khamoshchat/{recipientId}/{recipientDeviceId}/{senderId}/{senderDeviceId}
+        // Split yields: ["", "khamoshchat", recipientId, recipientDeviceId, senderId, senderDeviceId]
         let parts: Vec<&str> = topic.split('/').collect();
-        let len = parts.len();
-        if len >= 2 {
-            let user_id = parts[len - 2];
-            let device_id = parts[len - 1];
+        if parts.len() == 6 && parts[1] == "khamoshchat" {
+            let recipient_id = parts[2];
+            let recipient_device_id = parts[3];
+            let sender_id = parts[4];
+            let sender_device_id = parts[5];
+
+            tracing::info!(
+                "Offline message: recipient={}/{} sender={}/{}",
+                recipient_id, recipient_device_id, sender_id, sender_device_id
+            );
 
             // 1. Fetch recipient's device to get FCM token
-            let pk = format!("USER#{}", user_id);
-            let sk = device_sk(device_id);
-            
+            let pk = format!("USER#{}", recipient_id);
+            let sk = device_sk(recipient_device_id);
+
             match get_item(&state, &pk, &sk).await {
                 Ok(Some(item)) => {
                     let device = crate::models::device::Device::from(item);
                     if let Some(fcm_token) = device.fcm_token {
-                        // 2. Dispatch Push Notification
-                        // Create a dummy payload for the push
+                        // 2. Dispatch Push Notification (data-only wake-up, no ciphertext)
                         let push_payload = serde_json::json!({
                             "type": "offline_message",
+                            "sender_id": sender_id,
+                            "sender_device_id": sender_device_id,
                             "topic": topic,
-                            // don't send the full ciphertext in push, just a wake-up
                         });
-                        
+
                         let _ = send_push(&fcm_token, &push_payload).await.map_err(|e| {
                             tracing::error!("Failed to send push notification: {:?}", e);
                         });
                     } else {
-                        tracing::warn!("Device found but no FCM token present: {}/{}", user_id, device_id);
+                        tracing::warn!(
+                            "Device found but no FCM token: recipient={}/{}",
+                            recipient_id, recipient_device_id
+                        );
                     }
                 }
-                Ok(None) => tracing::warn!("Device not found for offline message: {}/{}", user_id, device_id),
+                Ok(None) => tracing::warn!(
+                    "Device not found for offline message: recipient={}/{}",
+                    recipient_id, recipient_device_id
+                ),
                 Err(e) => tracing::error!("Failed to fetch device: {:?}", e),
             }
 
