@@ -94,10 +94,16 @@ pub async fn update_item_fcm(
         .key("sk", AttributeValue::S(sk.to_string()))
         .update_expression("SET fcmToken = :token")
         .expression_attribute_values(":token", AttributeValue::S(fcm_token.to_string()))
+        .condition_expression("attribute_exists(signedDeviceKey)")
         .send()
         .await
         .map_err(|e| {
-            tracing::error!("Failed to update fcmToken in DynamoDB: {}", e);
+            if let aws_sdk_dynamodb::error::SdkError::ServiceError(ref se) = e {
+                if se.err().is_conditional_check_failed_exception() {
+                    return AppError::NotFound("Device not found or not registered".to_string());
+                }
+            }
+            tracing::error!("Failed to update fcmToken in DynamoDB: {:?}", e);
             AppError::Internal("Database error".into())
         })?;
 
@@ -109,6 +115,7 @@ pub async fn pop_opk(
     pk: &str,
     sk: &str,
     opk_index: usize,
+    expected_opk: &str,
 ) -> Result<(), AppError> {
     state
         .dynamo
@@ -117,10 +124,17 @@ pub async fn pop_opk(
         .key("pk", AttributeValue::S(pk.to_string()))
         .key("sk", AttributeValue::S(sk.to_string()))
         .update_expression(format!("REMOVE opks[{}]", opk_index))
+        .condition_expression(format!("opks[{}] = :expected", opk_index))
+        .expression_attribute_values(":expected", AttributeValue::S(expected_opk.to_string()))
         .send()
         .await
         .map_err(|e| {
-            tracing::error!("Failed to pop OPK in DynamoDB: {}", e);
+            if let aws_sdk_dynamodb::error::SdkError::ServiceError(ref se) = e {
+                if se.err().is_conditional_check_failed_exception() {
+                    return AppError::Conflict("OPK conflict detected".to_string());
+                }
+            }
+            tracing::error!("Failed to pop OPK in DynamoDB: {:?}", e);
             AppError::Internal("Database error".into())
         })?;
 

@@ -15,12 +15,15 @@ Endpoints for registration do not require client authentication:
 - `POST /register/device` — validated via VXEdDSA dual-key verification at the application level.
 
 ### Authenticated Endpoints (Public API)
+
 Endpoints that operate on existing client data or perform key discovery require **Stateless Signature Authentication**. The middleware verifies the caller's identity before the request reaches the handler.
 - Clients must include the following headers:
     - `X-User-Id`: The user's ID.
     - `X-Timestamp`: Current UTC timestamp in milliseconds.
     - `X-Signature`: A Base64 VXEdDSA signature of `userId + timestamp`.
     - `X-Vrf`: A Base64 VRF output corresponding to the signature.
+- **Drift Tolerance**: The `X-Timestamp` must be within **±10 seconds** of the server's current UTC time.
+- **Replay Protection**: Requests to `/register/device/fcm` are protected by a **10-second Redis-backed replay cache** that tracks signature uniqueness. Replayed requests are rejected with `401 Unauthorized`.
 - **Applies to**:
     - `POST /bundle/{identifier}` — Key discovery (retrieves public key bundle).
     - `POST /register/device/fcm` — Updates the device FCM token.
@@ -138,3 +141,7 @@ Updates the Firebase Cloud Messaging token for a specific device.
       "fcmToken": "string"
     }
     ```
+- **Responses**:
+    - `200 OK`: `{"status": "success", "message": "FCM token updated"}`
+    - `401 Unauthorized`: If the signature is invalid, timestamp drift is >10 seconds, or a signature replay is detected.
+    - `404 Not Found`: If the device is not registered (guarantees no ghost devices are created in DynamoDB).

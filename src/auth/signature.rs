@@ -61,7 +61,7 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
             timestamp - now
         };
 
-        if drift > 300_000 {
+        if drift > 10_000 {
             return Err(AppError::Unauthorized("Timestamp expired or too far in the future".to_string()));
         }
 
@@ -97,6 +97,16 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
                 if output_vrf != expected_vrf_bytes.as_slice() {
                    return Err(AppError::Unauthorized("VRF mismatch".to_string()));
                 }
+                
+                // Redis replay protection (Only for FCM update endpoint, 10 seconds TTL)
+                if parts.uri.path() == "/register/device/fcm" {
+                    let replay_key = format!("replay:sig:{}", signature_b64);
+                    if let Some(_) = crate::db::temp::get_temp_json(state, &replay_key).await? {
+                        return Err(AppError::Unauthorized("Replay attack detected".to_string()));
+                    }
+                    crate::db::temp::set_temp_json(state, &replay_key, "1", 10).await?;
+                }
+
                 Ok(AuthenticatedUser {
                     user_id: user_id.to_string(),
                 })

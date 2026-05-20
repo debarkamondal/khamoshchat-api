@@ -133,6 +133,7 @@ Authenticated endpoints on the **Public API (port 3000)** — those that retriev
 sequenceDiagram
     participant C as Client
     participant S as Server
+    participant R as Redis
     participant D as DynamoDB
 
     Note over C: Construct payload:<br/>message = userId + timestamp
@@ -141,7 +142,16 @@ sequenceDiagram
 
     C->>+S: Request with headers:<br/>X-User-Id · X-Timestamp<br/>X-Signature · X-Vrf
 
-    Note over S: 1. Validate timestamp<br/>(±5 min drift allowed)
+    Note over S: 1. Validate timestamp<br/>(±10 sec drift allowed)
+
+    alt Request is for FCM update (/register/device/fcm)
+        S->>R: Check and set signature key (10s TTL)
+        alt Signature exists
+            S-->>C: ❌ 401 Replay attack detected
+        else Signature unique
+            Note over S: Store signature in Redis
+        end
+    end
 
     S->>D: Fetch Profile (signedPreKey)
     D-->>S: Profile item
@@ -159,9 +169,14 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A["Incoming request with<br/>X-User-Id, X-Timestamp,<br/>X-Signature, X-Vrf"] --> B{"Timestamp within<br/>±5 min of server time?"}
+    A["Incoming request with<br/>X-User-Id, X-Timestamp,<br/>X-Signature, X-Vrf"] --> B{"Timestamp within<br/>±10 sec of server time?"}
     B -- No --> ERR1["❌ 401: Timestamp expired<br/>or too far in the future"]
-    B -- Yes --> C["Fetch Profile from DynamoDB<br/>using X-User-Id"]
+    B -- Yes --> B2{"Path is FCM update?"}
+    B2 -- Yes --> B3{"Signature exists in Redis?"}
+    B3 -- Yes --> ERR5["❌ 401: Replay attack detected"]
+    B3 -- No --> B4["Store signature in Redis<br/>with 10s TTL"]
+    B4 --> C["Fetch Profile from DynamoDB<br/>using X-User-Id"]
+    B2 -- No --> C
     C --> D{"Profile found?"}
     D -- No --> ERR2["❌ 401: User not found"]
     D -- Yes --> E["Extract signedPreKey<br/>from Profile"]
@@ -178,13 +193,14 @@ flowchart TD
     style ERR2 fill:#e74c3c,color:#fff
     style ERR3 fill:#e74c3c,color:#fff
     style ERR4 fill:#e74c3c,color:#fff
+    style ERR5 fill:#e74c3c,color:#fff
 ```
 
 ### Security Properties
 
 | Property | Mechanism |
 | :--- | :--- |
-| **Replay protection** | Timestamp must be within ±5 minutes of server time |
+| **Replay protection** | Timestamp must be within ±10 seconds of server time. Additionally, `/register/device/fcm` validates signature uniqueness in a 10s TTL Redis cache. |
 | **Identity binding** | Signature is over `userId + timestamp`, tying the request to a specific user |
 | **Key binding** | Verified against the user's `signedPreKey` stored at registration |
 | **VRF integrity** | VRF output must match, proving the signer holds the private key corresponding to `signedPreKey` |
@@ -209,11 +225,20 @@ sequenceDiagram
 
     A->>+S: POST /bundle/{bob_id}<br/>with signature headers
 
-    S->>D: Fetch Bob's Profile<br/>(iKey, signedPreKey, signature)
-    D-->>S: Profile item
+    loop Retry up to 5 times on Conflict
+        S->>D: Fetch Bob's Profile<br/>(iKey, signedPreKey, signature)
+        D-->>S: Profile item
 
-    S->>D: Consume one OPK<br/>(remove from opks list)
-    D-->>S: opk
+        Note over S: Select last OPK & its index
+
+        S->>D: pop_opk(opks[last_index] == expected)<br/>(atomic conditional pop)
+        
+        alt Success
+            Note over S: OPK popped successfully
+        else Conflict (Concurrent pop)
+            Note over S: Retry loop
+        end
+    end
 
     S-->>-A: Pre-Key Bundle:<br/>{iKey, signedPreKey,<br/>signature, opk}
 
