@@ -9,7 +9,9 @@ pub struct AppState {
     pub primary_table: String,
     pub gsi_lookup_index: String,
     pub google_client_id: String,
+    #[allow(dead_code)]
     pub google_client_secret: String,
+    #[allow(dead_code)]
     pub google_redirect_uri: String,
     pub google_jwks: std::sync::Arc<tokio::sync::RwLock<(u64, Option<jsonwebtoken::jwk::JwkSet>)>>,
 }

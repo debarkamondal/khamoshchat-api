@@ -1,6 +1,7 @@
 use aws_sdk_dynamodb::types::AttributeValue;
 use std::collections::HashMap;
 
+#[allow(dead_code)]
 pub struct Device {
     pub signed_device_key: Option<String>,
     pub fcm_token: Option<String>,

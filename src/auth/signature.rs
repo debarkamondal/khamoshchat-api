@@ -38,11 +38,11 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
             .and_then(|h| h.to_str().ok())
             .ok_or_else(|| AppError::Unauthorized("Missing X-Signature header".to_string()))?;
 
-        // let vrf_b64 = parts
-        //     .headers
-        //     .get("X-Vrf")
-        //     .and_then(|h| h.to_str().ok())
-        //     .ok_or_else(|| AppError::Unauthorized("Missing X-Vrf header".to_string()))?;
+        let vrf_b64 = parts
+            .headers
+            .get("X-Vrf")
+            .and_then(|h| h.to_str().ok())
+            .ok_or_else(|| AppError::Unauthorized("Missing X-Vrf header".to_string()))?;
 
         // 1. Timestamp validation (prevent replay attacks)
         let timestamp: u64 = timestamp_str.parse().map_err(|_| {
@@ -80,9 +80,6 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
             AppError::Unauthorized("Missing signed_prekey for user".to_string())
         })?;
 
-        // let stored_vrf_b64 = profile.vrf.ok_or_else(|| {
-        //     AppError::Unauthorized("Missing vrf for user".to_string())
-        // })?;
 
         // 3. Verify Signature
         // The signed payload is: userId + timestamp
@@ -90,17 +87,16 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
         
         let signed_prekey_bytes = crate::crypto::decode_b64_key(&signed_prekey_b64, crate::crypto::PUBLIC_KEY_LENGTH, "signedPreKey")?;
         let signature_bytes = crate::crypto::decode_b64_key(signature_b64, crate::crypto::SIGNATURE_LENGTH, "signature")?;
-        // let expected_vrf_bytes = crate::crypto::decode_b64_key(vrf_b64, crate::crypto::VRF_LENGTH, "vrf")?;
+        let expected_vrf_bytes = crate::crypto::decode_b64_key(vrf_b64, crate::crypto::VRF_LENGTH, "vrf")?;
         
         let public_key: [u8; 33] = signed_prekey_bytes.try_into().unwrap();
         let sig: [u8; 96] = signature_bytes.try_into().unwrap();
 
         match verify_signature(&public_key, payload.as_bytes(), &sig) {
             Ok(output_vrf) => {
-                // VRF matching could be added here if needed, comparing output_vrf with expected_vrf_bytes
-                // if output_vrf != expected_vrf_bytes {
-                //    return Err(AppError::Unauthorized("VRF mismatch".to_string()));
-                // }
+                if output_vrf != expected_vrf_bytes.as_slice() {
+                   return Err(AppError::Unauthorized("VRF mismatch".to_string()));
+                }
                 Ok(AuthenticatedUser {
                     user_id: user_id.to_string(),
                 })

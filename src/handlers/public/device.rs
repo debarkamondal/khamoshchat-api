@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 use crate::{
-    crypto::verify_signed_prekey,
+    crypto::verify_signed_signature,
     db::{
         keys::{device_sk, pending_reg_key, profile_sk, user_pk},
         primary::transact_write_items,
@@ -23,13 +23,19 @@ pub struct RegisterDeviceRequest {
     pub i_key: String,
     #[serde(rename = "signedPreKey")]
     pub signed_prekey: String,
-    pub sign: String,
-    pub vrf: String,
+    #[serde(rename = "preKeySign")]
+    pub pre_key_sign: String,
+    #[serde(rename = "preKeyVrf")]
+    pub pre_key_vrf: String,
     #[serde(default)]
     pub opks: Vec<String>,
     pub device_id: String,
-    #[serde(rename = "signedDeviceKey")]
+    #[serde(rename = "signDevKey")]
     pub signed_device_key: String,
+    #[serde(rename = "devKeySign")]
+    pub dev_key_sign: String,
+    #[serde(rename = "devKeyVrf")]
+    pub dev_key_vrf: String,
     #[serde(rename = "fcmToken")]
     pub fcm_token: Option<String>,
 }
@@ -50,7 +56,20 @@ pub async fn register_device(
         .map_err(|e| AppError::Internal(format!("Corrupt pending registration data: {}", e)))?;
 
     // 2. Verify crypto
-    verify_signed_prekey(&req.i_key, &req.signed_prekey, &req.sign)?;
+    verify_signed_signature(
+        &req.i_key,
+        &req.signed_prekey,
+        &req.pre_key_sign,
+        &req.pre_key_vrf,
+        "signedPreKey",
+    )?;
+    verify_signed_signature(
+        &req.i_key,
+        &req.signed_device_key,
+        &req.dev_key_sign,
+        &req.dev_key_vrf,
+        "signedDeviceKey",
+    )?;
 
     // 3. Write to Primary Table (transact)
     let pk = user_pk(&req.user_id);
@@ -61,19 +80,21 @@ pub async fn register_device(
     profile_item.insert("pk".to_string(), AttributeValue::S(pk.clone()));
     profile_item.insert("sk".to_string(), AttributeValue::S(profile_sk()));
     profile_item.insert("lookup".to_string(), AttributeValue::S(req.phone.clone()));
-    
+
     profile_item.insert("name".to_string(), AttributeValue::S(pending_data.name));
     profile_item.insert("email".to_string(), AttributeValue::S(pending_data.email));
     profile_item.insert("phone".to_string(), AttributeValue::S(req.phone));
     if let Some(pic) = pending_data.picture {
         profile_item.insert("picture".to_string(), AttributeValue::S(pic));
     }
-    
+
     profile_item.insert("iKey".to_string(), AttributeValue::S(req.i_key));
-    profile_item.insert("signedPreKey".to_string(), AttributeValue::S(req.signed_prekey));
-    profile_item.insert("signature".to_string(), AttributeValue::S(req.sign));
-    profile_item.insert("vrf".to_string(), AttributeValue::S(req.vrf));
-    
+    profile_item.insert(
+        "signedPreKey".to_string(),
+        AttributeValue::S(req.signed_prekey),
+    );
+    profile_item.insert("signature".to_string(), AttributeValue::S(req.pre_key_sign));
+
     if !req.opks.is_empty() {
         let opks_attr: Vec<AttributeValue> = req
             .opks
@@ -82,17 +103,29 @@ pub async fn register_device(
             .collect();
         profile_item.insert("opks".to_string(), AttributeValue::L(opks_attr));
     }
-    profile_item.insert("createdAt".to_string(), AttributeValue::N(now_millis.to_string()));
+    profile_item.insert(
+        "createdAt".to_string(),
+        AttributeValue::N(now_millis.to_string()),
+    );
 
     // Device Item
     let mut device_item = HashMap::new();
     device_item.insert("pk".to_string(), AttributeValue::S(pk.clone()));
-    device_item.insert("sk".to_string(), AttributeValue::S(device_sk(&req.device_id)));
-    device_item.insert("signedDeviceKey".to_string(), AttributeValue::S(req.signed_device_key));
+    device_item.insert(
+        "sk".to_string(),
+        AttributeValue::S(device_sk(&req.device_id)),
+    );
+    device_item.insert(
+        "signedDeviceKey".to_string(),
+        AttributeValue::S(req.signed_device_key),
+    );
     if let Some(fcm) = req.fcm_token {
         device_item.insert("fcmToken".to_string(), AttributeValue::S(fcm));
     }
-    device_item.insert("createdAt".to_string(), AttributeValue::N(now_millis.to_string()));
+    device_item.insert(
+        "createdAt".to_string(),
+        AttributeValue::N(now_millis.to_string()),
+    );
 
     // Transact write
     transact_write_items(&state, vec![profile_item, device_item]).await?;
