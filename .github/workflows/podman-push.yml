@@ -3,9 +3,7 @@ name: Build and Push OCI Image
 on:
   push:
     branches:
-      - main
-    tags:
-      - 'v*'
+      - '**'
   pull_request:
     branches:
       - main
@@ -45,12 +43,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
 
       - name: Build and push
         uses: docker/build-push-action@v6
