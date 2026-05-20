@@ -61,6 +61,7 @@ Images are available for both `linux/amd64` and `linux/arm64`.
 Detailed documentation is available in the `docs/` directory:
 
 *   [**Architecture Guide**](docs/architecture.md): Deep dive into the security model, identity system, and database patterns.
+*   [**Cryptographic Flows**](docs/cryptographic_flows.md): Detailed VXEdDSA verification, registration signatures, and stateless auth flows.
 *   [**API Reference**](docs/api.md): Complete list of endpoints, request/response schemas, and authentication methods.
 *   [**Development Guide**](docs/development.md): How to contribute, run tests, and deploy the application.
 

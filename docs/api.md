@@ -15,10 +15,10 @@ Endpoints under `/register` and `/bundle` are generally public, though some may 
 ### Private Endpoints
 Private endpoints require **Stateless Signature Authentication**.
 - Clients must include the following headers:
-    - `X-Khamosh-User-ID`: The user's ID.
-    - `X-Khamosh-Device-ID`: The specific device ID.
-    - `X-Khamosh-Signature`: A Base64 signature of the payload + timestamp.
-    - `X-Khamosh-Timestamp`: Current UTC timestamp in milliseconds.
+    - `X-User-Id`: The user's ID.
+    - `X-Timestamp`: Current UTC timestamp in milliseconds.
+    - `X-Signature`: A Base64 VXEdDSA signature of `userId + timestamp`.
+    - `X-Vrf`: A Base64 VRF output corresponding to the signature.
 
 ---
 
@@ -47,14 +47,17 @@ Finalizes registration by uploading the device's cryptographic public keys.
       "phone": "string",
       "iKey": "string (Base64 Identity Key)",
       "signedPreKey": "string (Base64 Signed Pre-Key)",
-      "sign": "string (Signature of signedPreKey)",
-      "vrf": "string (VRF Public Key)",
+      "preKeySign": "string (VXEdDSA Signature of signedPreKey)",
+      "preKeyVrf": "string (VRF output from signedPreKey signature)",
       "opks": ["string (One-Time Pre-Keys)"],
       "device_id": "string",
-      "signedDeviceKey": "string",
+      "signDevKey": "string (Base64 Signed Device Key)",
+      "devKeySign": "string (VXEdDSA Signature of signDevKey)",
+      "devKeyVrf": "string (VRF output from signDevKey signature)",
       "fcmToken": "string (Optional)"
     }
     ```
+- **Verification**: The server performs VXEdDSA verification on **both** the signed pre-key and the signed device key. Each signature must produce a VRF output matching the provided `preKeyVrf` / `devKeyVrf`.
 
 ---
 

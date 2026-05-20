@@ -9,6 +9,12 @@ The backend is strictly a **message router** and **identity registry**. It does 
 - Plaintext message content.
 - Cryptographic session secrets.
 
+### VXEdDSA Signatures & VRF
+All cryptographic signatures in the system use the **VXEdDSA** scheme, which produces both a signature and a Verifiable Random Function (VRF) output. The VRF output acts as an additional integrity check:
+- During registration, clients sign both their **Signed Pre-Key** and **Signed Device Key** with their Identity Key, submitting the signature and VRF output for each.
+- The server verifies each signature and confirms the VRF output matches, ensuring the signer provably holds the Identity Key.
+- The VRF output is **not stored** server-side; it is verified at the time of the operation and discarded.
+
 ### X3DH (Extended Triple Diffie-Hellman)
 The system facilitates the X3DH protocol by acting as a repository for Pre-Key Bundles. 
 1. Clients upload their **Identity Key (iKey)**, **Signed Pre-Key**, and **One-Time Pre-Keys (OPKs)**.
@@ -16,8 +22,10 @@ The system facilitates the X3DH protocol by acting as a repository for Pre-Key B
 3. The server merely delivers the initial handshake and subsequent encrypted messages.
 
 ### Stateless Signature Authentication
-Post-registration, clients authenticate using cryptographic signatures. 
-- **Mechanism**: Every request to a private endpoint must include a signature of the payload (or a timestamped challenge) signed by the device's `signedPreKey`.
+Post-registration, clients authenticate using VXEdDSA signatures.
+- **Mechanism**: Every request to a private endpoint must include a VXEdDSA signature of `userId + timestamp`, signed by the device's `signedPreKey`, along with the corresponding VRF output.
+- **Headers**: `X-User-Id`, `X-Timestamp`, `X-Signature`, `X-Vrf`.
+- **Verification**: The server fetches the user's `signedPreKey` from DynamoDB and verifies the signature and VRF match.
 - **Benefit**: No sessions, no JWTs, and the server verifies identity using the same keys used for encryption.
 
 ## 2. Identity & Entity Model
@@ -36,8 +44,8 @@ We use a single DynamoDB table to store all entities, utilizing the Partition Ke
 
 | Entity | Partition Key (`pk`) | Sort Key (`sk`) | Description |
 | :--- | :--- | :--- | :--- |
-| **Profile** | `USER#<userId>` | `PROFILE` | Basic info (name, email, iKey, signedPreKey). |
-| **Device** | `USER#<userId>` | `DEVICE#<deviceId>` | Device-specific keys and FCM tokens. |
+| **Profile** | `USER#<userId>` | `PROFILE` | Basic info (name, email, iKey, signedPreKey, signature). |
+| **Device** | `USER#<userId>` | `DEVICE#<deviceId>` | Device-specific signed key and FCM tokens. |
 | **Lookup** | `LOOKUP#<phone>` | `PROFILE` | (GSI) Allows finding `userId` via phone number. |
 
 ### Temporary Storage (Redis)
@@ -48,6 +56,38 @@ Redis is used for short-lived state, primarily during the registration handoff:
 
 The registration is a two-phase handshake to ensure identity verification precedes cryptographic setup.
 
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant G as Google JWKS
+    participant R as Redis
+    participant D as DynamoDB
+
+    rect rgb(40, 40, 60)
+    Note over C,G: Phase 1 — OAuth Verification
+    C->>S: POST /register/google/id_token<br/>{id_token}
+    S->>G: Verify token against JWKS
+    G-->>S: Claims (email, name, picture)
+    S->>R: Store claims with TTL 10 min<br/>key: pending:{userId}
+    S-->>C: {userId}
+    end
+
+    rect rgb(40, 60, 40)
+    Note over C,D: Phase 2 — Device & Key Setup
+    Note over C: Generate iKey, signedPreKey,<br/>signDevKey, OPKs locally
+    Note over C: VXEdDSA sign both keys with iKey
+    C->>S: POST /register/device<br/>{iKey, signedPreKey, preKeySign,<br/>preKeyVrf, signDevKey, devKeySign,<br/>devKeyVrf, device_id, phone, opks}
+    S->>R: Fetch pending claims
+    R-->>S: {name, email, picture}
+    Note over S: Verify #1: signedPreKey sig + VRF
+    Note over S: Verify #2: signDevKey sig + VRF
+    S->>D: TransactWriteItems<br/>[Profile, Device]
+    S->>R: Delete pending key
+    S-->>C: {status: success}
+    end
+```
+
 ### Phase 1: OAuth Verification
 1. Client sends a Google `id_token` to `/register/google/id_token`.
 2. Server verifies the token with Google's JWKS.
@@ -55,8 +95,11 @@ The registration is a two-phase handshake to ensure identity verification preced
 
 ### Phase 2: Device & Key Setup
 1. Client generates cryptographic keys locally.
-2. Client sends `userId`, `iKey`, `signedPreKey`, and `signedDeviceKey` to `/register/device`.
-3. Server validates the signature, retrieves claims from Redis, and commits the Profile and Device items to DynamoDB in a single transaction.
+2. Client sends `userId`, `iKey`, `signedPreKey`, `preKeySign`, `preKeyVrf`, `signDevKey`, `devKeySign`, and `devKeyVrf` to `/register/device`.
+3. Server performs **dual VXEdDSA verification**: validates the signature and VRF for both the signed pre-key and the signed device key against the Identity Key.
+4. Server retrieves claims from Redis, and commits the Profile and Device items to DynamoDB in a single transaction. VRF outputs are verified but **not persisted**.
+
+> For detailed verification flowcharts, see [Cryptographic Flows](cryptographic_flows.md#2-registration-dual-key-verification).
 
 ## 5. Messaging Layer (MQTT)
 
@@ -84,3 +127,29 @@ When the recipient is offline, RMQTT stores the message (Redis-backed) and fires
 2. Looks up the device's `fcm_token` in DynamoDB.
 3. Sends a **data-only** push notification (no ciphertext) to wake the client.
 4. The client reconnects via MQTT and retrieves the stored message from the broker.
+
+```mermaid
+sequenceDiagram
+    participant A as Sender
+    participant M as RMQTT Broker
+    participant S as Server (3001)
+    participant D as DynamoDB
+    participant F as Firebase (FCM)
+    participant B as Recipient
+
+    A->>M: Publish encrypted message
+
+    alt Recipient online
+        M-->>B: Deliver in real-time
+    else Recipient offline
+        M->>M: Store message (Redis-backed)
+        M->>S: POST /offline_message webhook
+        S->>S: Parse IDs from topic
+        S->>D: Lookup fcm_token
+        D-->>S: fcm_token
+        S->>F: Data-only push notification
+        F-->>B: Wake notification
+        B->>M: Reconnect
+        M-->>B: Deliver stored message
+    end
+```

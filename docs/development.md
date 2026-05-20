@@ -49,7 +49,10 @@ cargo test
 *Note: Some tests may require a local Redis instance or specific AWS credentials.*
 
 ### Validating Crypto Flows
-The `src/crypto.rs` and `src/auth/` modules contain critical logic. Ensure any changes to these modules are accompanied by unit tests.
+The `src/crypto.rs` and `src/auth/` modules contain critical logic. Key functions to verify:
+- `verify_signed_signature()`: Unified VXEdDSA + VRF verification used during registration (dual key verification for both pre-key and device key).
+- `verify_signature()`: Raw VXEdDSA verification used in stateless auth (signature + VRF match against `userId + timestamp`).
+Ensure any changes to these modules are accompanied by unit tests.
 
 ## 4. Deployment
 
