@@ -78,6 +78,7 @@ docker run -d \
 ```
 
 ### Production Considerations
+- **Network Isolation**: Port 3001 (Private API) must **not** be exposed to the internet. It is for internal backend services only (e.g., RMQTT webhooks). Use firewall rules or network policies to restrict access.
 - **AWS Permissions**: Ensure the production environment has an IAM role with `dynamodb:PutItem`, `dynamodb:GetItem`, and `dynamodb:UpdateItem` permissions on the primary table.
 - **Secrets**: Use a secret manager for Google Client secrets and AWS credentials.
 - **RMQTT Hooks**: The API relies on RMQTT webhooks for handling message delivery states. Ensure the RMQTT configuration in `devenv/rmqtt/` is correctly mirrored in production.

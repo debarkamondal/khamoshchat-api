@@ -22,11 +22,13 @@ The system facilitates the X3DH protocol by acting as a repository for Pre-Key B
 3. The server merely delivers the initial handshake and subsequent encrypted messages.
 
 ### Stateless Signature Authentication
-Post-registration, clients authenticate using VXEdDSA signatures.
-- **Mechanism**: Every request to a private endpoint must include a VXEdDSA signature of `userId + timestamp`, signed by the device's `signedPreKey`, along with the corresponding VRF output.
+Client-facing endpoints that operate on existing user data (e.g., FCM token updates) are protected by VXEdDSA signature authentication on the **Public API (port 3000)**.
+- **Mechanism**: Every authenticated request must include a VXEdDSA signature of `userId + timestamp`, signed by the device's `signedPreKey`, along with the corresponding VRF output.
 - **Headers**: `X-User-Id`, `X-Timestamp`, `X-Signature`, `X-Vrf`.
 - **Verification**: The server fetches the user's `signedPreKey` from DynamoDB and verifies the signature and VRF match.
 - **Benefit**: No sessions, no JWTs, and the server verifies identity using the same keys used for encryption.
+
+> **Note**: The Private API (port 3001) has no client-facing authentication — it is reserved for trusted backend services (e.g., RMQTT webhooks) and must be network-isolated from public traffic.
 
 ## 2. Identity & Entity Model
 
@@ -122,7 +124,7 @@ All four IDs are embedded in the topic, making the routing information self-desc
 
 ### Offline Delivery
 
-When the recipient is offline, RMQTT stores the message (Redis-backed) and fires the `offline_message` webhook to the private API (port 3001). The handler:
+When the recipient is offline, RMQTT stores the message (Redis-backed) and fires the `offline_message` webhook to the **Private API (port 3001)**. This port is internal-only — not exposed to clients. The handler:
 1. Parses `recipient_id` and `recipient_device_id` from the topic.
 2. Looks up the device's `fcm_token` in DynamoDB.
 3. Sends a **data-only** push notification (no ciphertext) to wake the client.

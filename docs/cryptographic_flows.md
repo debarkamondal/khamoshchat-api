@@ -125,7 +125,7 @@ flowchart TD
 
 ## 3. Stateless Signature Authentication
 
-Every request to a private endpoint (`port 3001`) is authenticated using VXEdDSA without sessions or tokens.
+Authenticated endpoints on the **Public API (port 3000)** — those that retrieve key discovery data or operate on existing client data (e.g., pre-key bundle retrieval, FCM token updates) — are protected by VXEdDSA signature authentication. No sessions or tokens are used.
 
 ### Sequence
 
@@ -207,7 +207,7 @@ sequenceDiagram
 
     Note over B: Previously registered:<br/>iKey, signedPreKey,<br/>OPKs uploaded
 
-    A->>+S: POST /bundle/{bob_id}
+    A->>+S: POST /bundle/{bob_id}<br/>with signature headers
 
     S->>D: Fetch Bob's Profile<br/>(iKey, signedPreKey, signature)
     D-->>S: Profile item

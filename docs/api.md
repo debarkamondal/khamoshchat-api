@@ -1,24 +1,32 @@
 # API Reference
 
-The KhamoshChat API is split into two distinct logical services, often running on different ports for security and routing purposes.
+The KhamoshChat API is split into two distinct logical services running on separate ports.
 
-- **Public API (Port 3000)**: Registration, discovery, and public key retrieval.
-- **Private API (Port 3001)**: Message routing and authenticated state updates.
+- **Public API (Port 3000)**: Client-facing — registration, key discovery, and authenticated device management.
+- **Private API (Port 3001)**: Internal only — **not exposed to clients**. Receives backend webhooks (e.g., RMQTT offline message notifications). Must be firewalled from external traffic.
 
 ---
 
 ## Authentication
 
-### Public Endpoints
-Endpoints under `/register` and `/bundle` are generally public, though some may require internal validation (like Google ID tokens).
+### Open Endpoints (Public API)
+Endpoints for registration do not require client authentication:
+- `POST /register/google/id_token` — validated via Google's JWKS.
+- `POST /register/device` — validated via VXEdDSA dual-key verification at the application level.
 
-### Private Endpoints
-Private endpoints require **Stateless Signature Authentication**.
+### Authenticated Endpoints (Public API)
+Endpoints that operate on existing client data or perform key discovery require **Stateless Signature Authentication**. The middleware verifies the caller's identity before the request reaches the handler.
 - Clients must include the following headers:
     - `X-User-Id`: The user's ID.
     - `X-Timestamp`: Current UTC timestamp in milliseconds.
     - `X-Signature`: A Base64 VXEdDSA signature of `userId + timestamp`.
     - `X-Vrf`: A Base64 VRF output corresponding to the signature.
+- **Applies to**:
+    - `POST /bundle/{identifier}` — Key discovery (retrieves public key bundle).
+    - `POST /register/device/fcm` — Updates the device FCM token.
+
+### Internal Endpoints (Private API — Port 3001)
+Private API endpoints have **no client-facing authentication**. They are intended to be called only by trusted backend services (e.g., RMQTT broker) and must be network-isolated from public traffic.
 
 ---
 
@@ -67,6 +75,7 @@ Finalizes registration by uploading the device's cryptographic public keys.
 Retrieves the cryptographic material required to start an E2EE session with a user.
 
 - **Endpoint**: `POST /bundle/{identifier}`
+- **Auth**: Requires Stateless Signature Authentication (`X-User-Id`, `X-Timestamp`, `X-Signature`, `X-Vrf` headers).
 - **Description**: Fetches the profile and a single One-Time Pre-Key for the given user identifier (`user_id` or phone).
 
 ---
@@ -114,12 +123,14 @@ When a subscriber is offline, the MQTT broker fires a webhook to the private API
 
 ---
 
-## 4. Device Management
+## 4. Device Management (Authenticated)
 
 ### Update FCM Token
 Updates the Firebase Cloud Messaging token for a specific device.
 
 - **Endpoint**: `POST /register/device/fcm`
+- **Port**: 3000 (Public API — client-facing)
+- **Auth**: Requires Stateless Signature Authentication (`X-User-Id`, `X-Timestamp`, `X-Signature`, `X-Vrf` headers).
 - **Request Body**:
     ```json
     {
