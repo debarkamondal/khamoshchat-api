@@ -71,7 +71,7 @@ sequenceDiagram
     Note over C: VXEdDSA sign signedPreKey with iKey<br/>→ preKeySign (96 B) + preKeyVrf (32 B)
     Note over C: VXEdDSA sign signDevKey with iKey<br/>→ devKeySign (96 B) + devKeyVrf (32 B)
 
-    C->>+S: POST /register/device<br/>{iKey, signedPreKey, preKeySign, preKeyVrf,<br/>signDevKey, devKeySign, devKeyVrf,<br/>device_id, phone, opks, fcmToken}
+    C->>+S: POST /register/device<br/>{iKey, signedPreKey, preKeySign, preKeyVrf,<br/>signDevKey, devKeySign, devKeyVrf,<br/>phone, opks, fcmToken}
 
     S->>R: Fetch pending registration (userId)
     R-->>S: {name, email, picture}

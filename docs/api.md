@@ -70,11 +70,18 @@ Finalizes registration by uploading the device's cryptographic public keys.
       "preKeySign": "string (VXEdDSA Signature of signedPreKey)",
       "preKeyVrf": "string (VRF output from signedPreKey signature)",
       "opks": ["string (One-Time Pre-Keys)"],
-      "device_id": "string",
       "signDevKey": "string (Base64 Signed Device Key)",
       "devKeySign": "string (VXEdDSA Signature of signDevKey)",
       "devKeyVrf": "string (VRF output from signDevKey signature)",
       "fcmToken": "string (Optional)"
+    }
+    ```
+- **Response**:
+    ```json
+    {
+      "status": "success",
+      "userId": "string",
+      "deviceId": "string (UUID)"
     }
     ```
 - **Verification**: The server performs VXEdDSA verification on **both** the signed pre-key and the signed device key. Each signature must produce a VRF output matching the provided `preKeyVrf` / `devKeyVrf`.

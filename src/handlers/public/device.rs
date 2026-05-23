@@ -2,6 +2,7 @@ use aws_sdk_dynamodb::types::AttributeValue;
 use axum::{extract::State, Json};
 use serde::Deserialize;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 use crate::{
     crypto::verify_signed_signature,
@@ -29,7 +30,6 @@ pub struct RegisterDeviceRequest {
     pub pre_key_vrf: String,
     #[serde(default)]
     pub opks: Vec<String>,
-    pub device_id: String,
     #[serde(rename = "signDevKey")]
     pub signed_device_key: String,
     #[serde(rename = "devKeySign")]
@@ -54,6 +54,9 @@ pub async fn register_device(
 
     let pending_data: TempRegistration = serde_json::from_str(&pending_json)
         .map_err(|e| AppError::Internal(format!("Corrupt pending registration data: {}", e)))?;
+
+    // Generate device_id server-side
+    let device_id = Uuid::new_v4().to_string();
 
     // 2. Verify crypto
     verify_signed_signature(
@@ -113,7 +116,7 @@ pub async fn register_device(
     device_item.insert("pk".to_string(), AttributeValue::S(pk.clone()));
     device_item.insert(
         "sk".to_string(),
-        AttributeValue::S(device_sk(&req.device_id)),
+        AttributeValue::S(device_sk(&device_id)),
     );
     device_item.insert(
         "signedDeviceKey".to_string(),
@@ -137,7 +140,7 @@ pub async fn register_device(
     Ok(Json(serde_json::json!({
         "status": "success",
         "userId": req.user_id,
-        "deviceId": req.device_id,
+        "deviceId": device_id,
     })))
 }
 

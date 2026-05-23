@@ -79,14 +79,14 @@ sequenceDiagram
     Note over C,D: Phase 2 — Device & Key Setup
     Note over C: Generate iKey, signedPreKey,<br/>signDevKey, OPKs locally
     Note over C: VXEdDSA sign both keys with iKey
-    C->>S: POST /register/device<br/>{iKey, signedPreKey, preKeySign,<br/>preKeyVrf, signDevKey, devKeySign,<br/>devKeyVrf, device_id, phone, opks}
+    C->>S: POST /register/device<br/>{iKey, signedPreKey, preKeySign,<br/>preKeyVrf, signDevKey, devKeySign,<br/>devKeyVrf, phone, opks}
     S->>R: Fetch pending claims
     R-->>S: {name, email, picture}
     Note over S: Verify #1: signedPreKey sig + VRF
     Note over S: Verify #2: signDevKey sig + VRF
     S->>D: TransactWriteItems<br/>[Profile, Device]
     S->>R: Delete pending key
-    S-->>C: {status: success}
+    S-->>C: {status: success, userId, deviceId}
     end
 ```
 
