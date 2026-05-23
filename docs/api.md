@@ -45,7 +45,16 @@ Verifies a Google OAuth token and creates a temporary registration session.
       "id_token": "string"
     }
     ```
-- **Response**: Returns `user_id` and user profile info extracted from the token.
+- **Response**:
+    ```json
+    {
+      "status": "success",
+      "userId": "string (UUID)",
+      "email": "string",
+      "name": "string (optional)",
+      "picture": "string (optional)"
+    }
+    ```
 
 ### Register Device & Keys
 Finalizes registration by uploading the device's cryptographic public keys.
@@ -80,6 +89,19 @@ Retrieves the cryptographic material required to start an E2EE session with a us
 - **Endpoint**: `POST /bundle/{identifier}`
 - **Auth**: Requires Stateless Signature Authentication (`X-User-Id`, `X-Timestamp`, `X-Signature`, `X-Vrf` headers).
 - **Description**: Fetches the profile and a single One-Time Pre-Key for the given user identifier (`user_id` or phone).
+- **Response**:
+    ```json
+    {
+      "identityKey": "string (Base64 Identity Key)",
+      "signedPreKey": "string (Base64 Signed Pre-Key)",
+      "signature": "string (VXEdDSA Signature of signedPreKey)",
+      "opk": {
+        "id": 0,
+        "key": "string (One-Time Pre-Key)"
+      }
+    }
+    ```
+    *(Note: `opk` is optional and is skipped if the user has no remaining One-Time Pre-Keys).*
 
 ---
 
@@ -115,11 +137,23 @@ When a subscriber is offline, the MQTT broker fires a webhook to the private API
     ```json
     {
       "action": "offline_message",
-      "topic": "/khamoshchat/{recipient_id}/{recipient_device_id}/{sender_id}/{sender_device_id}",
-      "payload": "string (Encrypted ciphertext, base64)",
+      "from_node": 1001,
+      "from_ipaddress": "127.0.0.1",
       "from_clientid": "string",
       "from_username": "string",
-      "ts": 1234567890
+      "node": 1001,
+      "ipaddress": "127.0.0.1",
+      "clientid": "string",
+      "username": "string",
+      "dup": false,
+      "retain": false,
+      "qos": 1,
+      "topic": "/khamoshchat/{recipient_id}/{recipient_device_id}/{sender_id}/{sender_device_id}",
+      "packet_id": "string (optional)",
+      "payload": "string (Encrypted ciphertext, base64)",
+      "pts": 1234567890,
+      "ts": 1234567890,
+      "time": "string (ISO timestamp)"
     }
     ```
 - **Behaviour**: Extracts `recipient_id` and `recipient_device_id` from the topic, looks up the device's `fcm_token`, and sends a data-only push notification. The ciphertext is **not** forwarded in the push.

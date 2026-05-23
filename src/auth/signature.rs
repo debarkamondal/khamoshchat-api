@@ -54,7 +54,7 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
             .unwrap()
             .as_millis() as u64;
 
-        // Allow +/- 5 minutes drift
+        // Allow +/- 10 seconds drift
         let drift = if now > timestamp {
             now - timestamp
         } else {

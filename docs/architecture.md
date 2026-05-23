@@ -71,7 +71,7 @@ sequenceDiagram
     C->>S: POST /register/google/id_token<br/>{id_token}
     S->>G: Verify token against JWKS
     G-->>S: Claims (email, name, picture)
-    S->>R: Store claims with TTL 10 min<br/>key: pending:{userId}
+    S->>R: Store claims with TTL 10 min<br/>key: reg:pending:{userId}
     S-->>C: {userId}
     end
 
