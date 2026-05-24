@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::{
     auth::signature::AuthenticatedUser,
-    db::{keys::user_pk, primary::{get_item, query_gsi_lookup, pop_opk}},
+    db::{keys::user_pk, primary::{get_item, query_gsi_lookup, pop_opk, get_user_device}},
     error::AppError,
     models::profile::Profile,
     state::AppState,
@@ -20,6 +20,10 @@ pub struct Opk {
 
 #[derive(Serialize)]
 pub struct PreKeyBundle {
+    #[serde(rename = "userId")]
+    user_id: String,
+    #[serde(rename = "deviceId")]
+    device_id: String,
     #[serde(rename = "identityKey")]
     identity_key: String,
     #[serde(rename = "signedPreKey")]
@@ -62,6 +66,11 @@ pub async fn get_bundle(
             AppError::Internal("Database error: missing pk on user profile".to_string())
         })?.clone();
 
+        let user_id = pk.strip_prefix("USER#").unwrap_or(&pk).to_string();
+        let device_id = get_user_device(&state, &pk)
+            .await?
+            .ok_or_else(|| AppError::NotFound("No registered devices found for user".to_string()))?;
+
         let profile = Profile::from(item);
 
         let identity_key = profile.identity_key.unwrap_or_default();
@@ -97,6 +106,8 @@ pub async fn get_bundle(
         }
 
         return Ok(Json(PreKeyBundle {
+            user_id,
+            device_id,
             identity_key,
             signed_prekey,
             signature,
