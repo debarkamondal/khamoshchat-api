@@ -11,6 +11,7 @@ use crate::{
 };
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GoogleIdTokenRequest {
     pub id_token: String,
 }

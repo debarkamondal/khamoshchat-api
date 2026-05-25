@@ -13,24 +13,22 @@ use crate::{
 };
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Opk {
     id: usize,
     key: String,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PreKeyBundle {
-    #[serde(rename = "userId")]
-    user_id: String,
-    #[serde(rename = "deviceId")]
-    device_id: String,
-    #[serde(rename = "identityKey")]
-    identity_key: String,
-    #[serde(rename = "signedPreKey")]
-    signed_prekey: String,
-    signature: String,
+    pub user_id: String,
+    pub device_id: String,
+    pub identity_key: String,
+    pub signed_pre_key: String,
+    pub signature: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    opk: Option<Opk>,
+    pub opk: Option<Opk>,
 }
 
 pub async fn get_bundle(
@@ -74,7 +72,7 @@ pub async fn get_bundle(
         let profile = Profile::from(item);
 
         let identity_key = profile.identity_key.unwrap_or_default();
-        let signed_prekey = profile.signed_prekey.unwrap_or_default();
+        let signed_pre_key = profile.signed_prekey.unwrap_or_default();
         let signature = profile.signature.unwrap_or_default();
 
         // Get last OPK with its index
@@ -109,7 +107,7 @@ pub async fn get_bundle(
             user_id,
             device_id,
             identity_key,
-            signed_prekey,
+            signed_pre_key,
             signature,
             opk,
         }));

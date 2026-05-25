@@ -17,26 +17,19 @@ use crate::{
 };
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RegisterDeviceRequest {
     pub user_id: String,
     pub phone: String,
-    #[serde(rename = "iKey")]
     pub i_key: String,
-    #[serde(rename = "signedPreKey")]
-    pub signed_prekey: String,
-    #[serde(rename = "preKeySign")]
+    pub signed_pre_key: String,
     pub pre_key_sign: String,
-    #[serde(rename = "preKeyVrf")]
     pub pre_key_vrf: String,
     #[serde(default)]
     pub opks: Vec<String>,
-    #[serde(rename = "signDevKey")]
     pub signed_device_key: String,
-    #[serde(rename = "devKeySign")]
     pub dev_key_sign: String,
-    #[serde(rename = "devKeyVrf")]
     pub dev_key_vrf: String,
-    #[serde(rename = "fcmToken")]
     pub fcm_token: Option<String>,
 }
 
@@ -61,7 +54,7 @@ pub async fn register_device(
     // 2. Verify crypto
     verify_signed_signature(
         &req.i_key,
-        &req.signed_prekey,
+        &req.signed_pre_key,
         &req.pre_key_sign,
         &req.pre_key_vrf,
         "signedPreKey",
@@ -94,7 +87,7 @@ pub async fn register_device(
     profile_item.insert("iKey".to_string(), AttributeValue::S(req.i_key));
     profile_item.insert(
         "signedPreKey".to_string(),
-        AttributeValue::S(req.signed_prekey),
+        AttributeValue::S(req.signed_pre_key),
     );
     profile_item.insert("signature".to_string(), AttributeValue::S(req.pre_key_sign));
 
@@ -145,9 +138,9 @@ pub async fn register_device(
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateFcmTokenRequest {
     pub device_id: String,
-    #[serde(rename = "fcmToken")]
     pub fcm_token: String,
 }
 
