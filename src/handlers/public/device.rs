@@ -103,6 +103,15 @@ pub async fn register_device(
         "createdAt".to_string(),
         AttributeValue::N(now_millis.to_string()),
     );
+    // Device fields merged into profile (until multi-device is implemented)
+    profile_item.insert("deviceId".to_string(), AttributeValue::S(device_id.clone()));
+    profile_item.insert(
+        "signedDeviceKey".to_string(),
+        AttributeValue::S(req.signed_device_key.clone()),
+    );
+    if let Some(ref fcm) = req.fcm_token {
+        profile_item.insert("fcmToken".to_string(), AttributeValue::S(fcm.clone()));
+    }
 
     // Device Item
     let mut device_item = HashMap::new();

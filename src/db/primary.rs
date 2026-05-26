@@ -1,6 +1,6 @@
+use crate::{error::AppError, state::AppState};
 use aws_sdk_dynamodb::types::{AttributeValue, Put, TransactWriteItem};
 use std::collections::HashMap;
-use crate::{state::AppState, error::AppError};
 
 pub async fn get_item(
     state: &AppState,
@@ -16,7 +16,10 @@ pub async fn get_item(
         .send()
         .await
         .map_err(|e| {
-            tracing::error!("DynamoDB get_item error: {}", aws_sdk_dynamodb::error::DisplayErrorContext(&e));
+            tracing::error!(
+                "DynamoDB get_item error: {}",
+                aws_sdk_dynamodb::error::DisplayErrorContext(&e)
+            );
             AppError::Internal("Database error".into())
         })?;
 
@@ -39,7 +42,10 @@ pub async fn query_gsi_lookup(
         .send()
         .await
         .map_err(|e| {
-            tracing::error!("DynamoDB query GSI error: {}", aws_sdk_dynamodb::error::DisplayErrorContext(&e));
+            tracing::error!(
+                "DynamoDB query GSI error: {}",
+                aws_sdk_dynamodb::error::DisplayErrorContext(&e)
+            );
             AppError::Internal("Database error".into())
         })?;
 
@@ -58,12 +64,8 @@ pub async fn transact_write_items(
             .set_item(Some(item))
             .build()
             .unwrap();
-            
-        transact_items.push(
-            TransactWriteItem::builder()
-                .put(put)
-                .build()
-        );
+
+        transact_items.push(TransactWriteItem::builder().put(put).build());
     }
 
     state
@@ -73,8 +75,14 @@ pub async fn transact_write_items(
         .send()
         .await
         .map_err(|e| {
-            tracing::error!("DynamoDB transact_write_items error: {}", aws_sdk_dynamodb::error::DisplayErrorContext(&e));
-            AppError::Internal(format!("Database error: {}", aws_sdk_dynamodb::error::DisplayErrorContext(&e)))
+            tracing::error!(
+                "DynamoDB transact_write_items error: {}",
+                aws_sdk_dynamodb::error::DisplayErrorContext(&e)
+            );
+            AppError::Internal(format!(
+                "Database error: {}",
+                aws_sdk_dynamodb::error::DisplayErrorContext(&e)
+            ))
         })?;
 
     Ok(())
@@ -103,7 +111,10 @@ pub async fn update_item_fcm(
                     return AppError::NotFound("Device not found or not registered".to_string());
                 }
             }
-            tracing::error!("Failed to update fcmToken in DynamoDB: {}", aws_sdk_dynamodb::error::DisplayErrorContext(&e));
+            tracing::error!(
+                "Failed to update fcmToken in DynamoDB: {}",
+                aws_sdk_dynamodb::error::DisplayErrorContext(&e)
+            );
             AppError::Internal("Database error".into())
         })?;
 
@@ -134,39 +145,12 @@ pub async fn pop_opk(
                     return AppError::Conflict("OPK conflict detected".to_string());
                 }
             }
-            tracing::error!("Failed to pop OPK in DynamoDB: {}", aws_sdk_dynamodb::error::DisplayErrorContext(&e));
+            tracing::error!(
+                "Failed to pop OPK in DynamoDB: {}",
+                aws_sdk_dynamodb::error::DisplayErrorContext(&e)
+            );
             AppError::Internal("Database error".into())
         })?;
 
     Ok(())
 }
-
-pub async fn get_user_device(
-    state: &AppState,
-    pk: &str,
-) -> Result<Option<String>, AppError> {
-    let res = state
-        .dynamo
-        .query()
-        .table_name(&state.primary_table)
-        .key_condition_expression("pk = :pk AND begins_with(sk, :prefix)")
-        .expression_attribute_values(":pk", AttributeValue::S(pk.to_string()))
-        .expression_attribute_values(":prefix", AttributeValue::S("DEVICE#".to_string()))
-        .limit(1)
-        .send()
-        .await
-        .map_err(|e| {
-            tracing::error!("DynamoDB query device error: {}", aws_sdk_dynamodb::error::DisplayErrorContext(&e));
-            AppError::Internal("Database error".into())
-        })?;
-
-    if let Some(item) = res.items.unwrap_or_default().into_iter().next() {
-        if let Some(sk_val) = item.get("sk").and_then(|v| v.as_s().ok()) {
-            if let Some(device_id) = sk_val.strip_prefix("DEVICE#") {
-                return Ok(Some(device_id.to_string()));
-            }
-        }
-    }
-    Ok(None)
-}
-

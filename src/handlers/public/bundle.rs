@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::{
     auth::signature::AuthenticatedUser,
-    db::{keys::user_pk, primary::{get_item, query_gsi_lookup, pop_opk, get_user_device}},
+    db::{keys::user_pk, primary::{get_item, query_gsi_lookup, pop_opk}},
     error::AppError,
     models::profile::Profile,
     state::AppState,
@@ -65,12 +65,10 @@ pub async fn get_bundle(
         })?.clone();
 
         let user_id = pk.strip_prefix("USER#").unwrap_or(&pk).to_string();
-        let device_id = get_user_device(&state, &pk)
-            .await?
-            .ok_or_else(|| AppError::NotFound("No registered devices found for user".to_string()))?;
 
         let profile = Profile::from(item);
 
+        let device_id = profile.device_id.unwrap_or_default();
         let identity_key = profile.identity_key.unwrap_or_default();
         let signed_pre_key = profile.signed_prekey.unwrap_or_default();
         let signature = profile.signature.unwrap_or_default();

@@ -12,6 +12,10 @@ pub struct Profile {
     pub signature: Option<String>,
     pub opks: Vec<String>,
     pub created_at: Option<u64>,
+    // Device fields (merged until multi-device is implemented)
+    pub device_id: Option<String>,
+    pub signed_device_key: Option<String>,
+    pub fcm_token: Option<String>,
 }
 
 impl From<HashMap<String, AttributeValue>> for Profile {
@@ -34,6 +38,9 @@ impl From<HashMap<String, AttributeValue>> for Profile {
             signature: item.get("signature").and_then(|v| v.as_s().ok().cloned()),
             opks,
             created_at: item.get("createdAt").and_then(|v| v.as_n().ok().and_then(|s| s.parse().ok())),
+            device_id: item.get("deviceId").and_then(|v| v.as_s().ok().cloned()),
+            signed_device_key: item.get("signedDeviceKey").and_then(|v| v.as_s().ok().cloned()),
+            fcm_token: item.get("fcmToken").and_then(|v| v.as_s().ok().cloned()),
         }
     }
 }
