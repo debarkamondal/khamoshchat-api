@@ -46,8 +46,8 @@ We use a single DynamoDB table to store all entities, utilizing the Partition Ke
 
 | Entity | Partition Key (`pk`) | Sort Key (`sk`) | Description |
 | :--- | :--- | :--- | :--- |
-| **Profile** | `USER#<userId>` | `PROFILE` | Basic info (name, email, iKey, signedPreKey, signature). |
-| **Device** | `USER#<userId>` | `DEVICE#<deviceId>` | Device-specific signed key and FCM tokens. |
+| **Profile** | `USER#<userId>` | `PROFILE` | Basic info (name, email, iKey, signedPreKey, signature), with device fields (deviceId, signedDeviceKey, fcmToken) consolidated directly inside this item (until multi-device is supported). |
+| **Device** | `USER#<userId>` | `DEVICE#<deviceId>` | Device-specific signed key and FCM tokens (written under `DEVICE#<deviceId>` for future multi-device support, but fetched directly from Profile during key discovery & webhook lookup). |
 | **Lookup** | `LOOKUP#<phone>` | `PROFILE` | (GSI) Allows finding `userId` via phone number. |
 
 ### Temporary Storage (Redis)
@@ -68,7 +68,7 @@ sequenceDiagram
 
     rect rgb(40, 40, 60)
     Note over C,G: Phase 1 — OAuth Verification
-    C->>S: POST /register/google/id_token<br/>{id_token}
+    C->>S: POST /register/google/id_token<br/>{idToken}
     S->>G: Verify token against JWKS
     G-->>S: Claims (email, name, picture)
     S->>R: Store claims with TTL 10 min<br/>key: reg:pending:{userId}
@@ -77,29 +77,30 @@ sequenceDiagram
 
     rect rgb(40, 60, 40)
     Note over C,D: Phase 2 — Device & Key Setup
-    Note over C: Generate iKey, signedPreKey,<br/>signDevKey, OPKs locally
+    Note over C: Generate iKey, signedPreKey,<br/>signedDeviceKey, OPKs locally
     Note over C: VXEdDSA sign both keys with iKey
-    C->>S: POST /register/device<br/>{iKey, signedPreKey, preKeySign,<br/>preKeyVrf, signDevKey, devKeySign,<br/>devKeyVrf, phone, opks}
+    C->>S: POST /register/device<br/>{userId, phone, iKey, signedPreKey, preKeySign,<br/>preKeyVrf, signedDeviceKey, devKeySign,<br/>devKeyVrf, opks}
+    Note over S: Generate deviceId (UUID)
     S->>R: Fetch pending claims
     R-->>S: {name, email, picture}
     Note over S: Verify #1: signedPreKey sig + VRF
-    Note over S: Verify #2: signDevKey sig + VRF
-    S->>D: TransactWriteItems<br/>[Profile, Device]
+    Note over S: Verify #2: signedDeviceKey sig + VRF
+    S->>D: TransactWriteItems<br/>[Profile, Device]<br/>(Device fields consolidated inside Profile)
     S->>R: Delete pending key
     S-->>C: {status: success, userId, deviceId}
     end
 ```
 
 ### Phase 1: OAuth Verification
-1. Client sends a Google `id_token` to `/register/google/id_token`.
+1. Client sends a Google `idToken` to `/register/google/id_token`.
 2. Server verifies the token with Google's JWKS.
 3. Server generates a `userId`, stores claims in Redis, and returns the `userId` to the client.
 
 ### Phase 2: Device & Key Setup
 1. Client generates cryptographic keys locally.
-2. Client sends `userId`, `iKey`, `signedPreKey`, `preKeySign`, `preKeyVrf`, `signDevKey`, `devKeySign`, and `devKeyVrf` to `/register/device`.
-3. Server performs **dual VXEdDSA verification**: validates the signature and VRF for both the signed pre-key and the signed device key against the Identity Key.
-4. Server retrieves claims from Redis, and commits the Profile and Device items to DynamoDB in a single transaction. VRF outputs are verified but **not persisted**.
+2. Client sends `userId`, `phone`, `iKey`, `signedPreKey`, `preKeySign`, `preKeyVrf`, `signedDeviceKey`, `devKeySign`, `devKeyVrf`, and `opks` to `/register/device`. (The client does **not** supply a device ID).
+3. Server generates a new `deviceId` (UUID) and performs **dual VXEdDSA verification**: validates the signature and VRF for both the signed pre-key and the signed device key against the Identity Key.
+4. Server retrieves claims from Redis, and commits the Profile and Device items to DynamoDB in a single transaction. Device credentials (`deviceId`, `signedDeviceKey`, `fcmToken`) are consolidated directly inside the Profile item for redundant lookup elimination, while also writing the Device item under the `DEVICE#<deviceId>` key for future multi-device capability. VRF outputs are verified but **not persisted**.
 
 > For detailed verification flowcharts, see [Cryptographic Flows](cryptographic_flows.md#2-registration-dual-key-verification).
 

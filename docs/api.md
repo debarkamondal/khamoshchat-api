@@ -42,7 +42,7 @@ Verifies a Google OAuth token and creates a temporary registration session.
 - **Request Body**:
     ```json
     {
-      "id_token": "string"
+      "idToken": "string"
     }
     ```
 - **Response**:
@@ -63,16 +63,16 @@ Finalizes registration by uploading the device's cryptographic public keys.
 - **Request Body**:
     ```json
     {
-      "user_id": "string",
+      "userId": "string",
       "phone": "string",
       "iKey": "string (Base64 Identity Key)",
       "signedPreKey": "string (Base64 Signed Pre-Key)",
       "preKeySign": "string (VXEdDSA Signature of signedPreKey)",
       "preKeyVrf": "string (VRF output from signedPreKey signature)",
       "opks": ["string (One-Time Pre-Keys)"],
-      "signDevKey": "string (Base64 Signed Device Key)",
-      "devKeySign": "string (VXEdDSA Signature of signDevKey)",
-      "devKeyVrf": "string (VRF output from signDevKey signature)",
+      "signedDeviceKey": "string (Base64 Signed Device Key)",
+      "devKeySign": "string (VXEdDSA Signature of signedDeviceKey)",
+      "devKeyVrf": "string (VRF output from signedDeviceKey signature)",
       "fcmToken": "string (Optional)"
     }
     ```
@@ -81,7 +81,7 @@ Finalizes registration by uploading the device's cryptographic public keys.
     {
       "status": "success",
       "userId": "string",
-      "deviceId": "string (UUID)"
+      "deviceId": "string"
     }
     ```
 - **Verification**: The server performs VXEdDSA verification on **both** the signed pre-key and the signed device key. Each signature must produce a VRF output matching the provided `preKeyVrf` / `devKeyVrf`.
@@ -99,6 +99,8 @@ Retrieves the cryptographic material required to start an E2EE session with a us
 - **Response**:
     ```json
     {
+      "userId": "string",
+      "deviceId": "string",
       "identityKey": "string (Base64 Identity Key)",
       "signedPreKey": "string (Base64 Signed Pre-Key)",
       "signature": "string (VXEdDSA Signature of signedPreKey)",
@@ -178,7 +180,7 @@ Updates the Firebase Cloud Messaging token for a specific device.
 - **Request Body**:
     ```json
     {
-      "device_id": "string",
+      "deviceId": "string",
       "fcmToken": "string"
     }
     ```

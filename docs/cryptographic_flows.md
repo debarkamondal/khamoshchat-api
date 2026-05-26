@@ -12,7 +12,7 @@ Each user's cryptographic identity consists of:
 | :--- | :--- | :--- |
 | **Identity Key (`iKey`)** | Curve25519 (33 bytes) | Long-term identity; signs all other keys |
 | **Signed Pre-Key (`signedPreKey`)** | Curve25519 (33 bytes) | Medium-term key for X3DH; also used for API authentication |
-| **Signed Device Key (`signDevKey`)** | Curve25519 (33 bytes) | Per-device key signed by the Identity Key |
+| **Signed Device Key (`signedDeviceKey`)** | Curve25519 (33 bytes) | Per-device key signed by the Identity Key |
 | **One-Time Pre-Keys (`opks`)** | Curve25519 (33 bytes each) | Ephemeral keys consumed during X3DH handshake |
 
 ```mermaid
@@ -66,12 +66,12 @@ sequenceDiagram
     participant R as Redis
     participant D as DynamoDB
 
-    Note over C: Generate keys locally:<br/>iKey, signedPreKey,<br/>signDevKey, OPKs
+    Note over C: Generate keys locally:<br/>iKey, signedPreKey,<br/>signedDeviceKey, OPKs
 
     Note over C: VXEdDSA sign signedPreKey with iKey<br/>→ preKeySign (96 B) + preKeyVrf (32 B)
-    Note over C: VXEdDSA sign signDevKey with iKey<br/>→ devKeySign (96 B) + devKeyVrf (32 B)
+    Note over C: VXEdDSA sign signedDeviceKey with iKey<br/>→ devKeySign (96 B) + devKeyVrf (32 B)
 
-    C->>+S: POST /register/device<br/>{iKey, signedPreKey, preKeySign, preKeyVrf,<br/>signDevKey, devKeySign, devKeyVrf,<br/>phone, opks, fcmToken}
+    C->>+S: POST /register/device<br/>{userId, phone, iKey, signedPreKey, preKeySign,<br/>preKeyVrf, signedDeviceKey, devKeySign,<br/>devKeyVrf, opks, fcmToken}
 
     S->>R: Fetch pending registration (userId)
     R-->>S: {name, email, picture}
@@ -80,7 +80,7 @@ sequenceDiagram
     Note over S: Verify #2: devKeySign
     Note over S: (see flowchart below)
 
-    S->>D: TransactWriteItems<br/>[Profile item, Device item]
+    S->>D: TransactWriteItems<br/>[Profile (consolidated), Device]
     D-->>S: Success
 
     S->>R: Delete pending registration key
@@ -97,8 +97,8 @@ flowchart TD
     C -- "None (invalid)" --> ERR1["❌ 401: Invalid signature<br/>for signedPreKey"]
     C -- "Some(vrf₁)" --> D{"vrf₁ == preKeyVrf?"}
     D -- No --> ERR2["❌ 401: VRF mismatch<br/>for signedPreKey"]
-    D -- Yes --> E["Decode signDevKey,<br/>devKeySign, devKeyVrf"]
-    E --> F{"vxeddsa_verify(<br/>iKey, signDevKey,<br/>devKeySign)"}
+    D -- Yes --> E["Decode signedDeviceKey,<br/>devKeySign, devKeyVrf"]
+    E --> F{"vxeddsa_verify(<br/>iKey, signedDeviceKey,<br/>devKeySign)"}
     F -- "None (invalid)" --> ERR3["❌ 401: Invalid signature<br/>for signedDeviceKey"]
     F -- "Some(vrf₂)" --> G{"vrf₂ == devKeyVrf?"}
     G -- No --> ERR4["❌ 401: VRF mismatch<br/>for signedDeviceKey"]
@@ -116,7 +116,7 @@ flowchart TD
 
 | Table Item | Fields Stored | Fields **NOT** Stored |
 | :--- | :--- | :--- |
-| **Profile** | `iKey`, `signedPreKey`, `signature` (preKeySign), `opks` | `preKeyVrf`, `devKeySign`, `devKeyVrf` |
+| **Profile** | `iKey`, `signedPreKey`, `signature` (preKeySign), `opks`, `deviceId`, `signedDeviceKey`, `fcmToken` | `preKeyVrf`, `devKeySign`, `devKeyVrf` |
 | **Device** | `signedDeviceKey`, `fcmToken` | VRF outputs |
 
 > VRF outputs are verified at registration time and discarded. They serve as proof-of-possession but are not needed post-verification.
@@ -240,7 +240,7 @@ sequenceDiagram
         end
     end
 
-    S-->>-A: Pre-Key Bundle:<br/>{iKey, signedPreKey,<br/>signature, opk}
+    S-->>-A: Pre-Key Bundle:<br/>{userId, deviceId, identityKey,<br/>signedPreKey, signature, opk}
 
     Note over A: Verify signature of<br/>signedPreKey using iKey
 
@@ -253,12 +253,12 @@ sequenceDiagram
     Note over B: Perform matching X3DH<br/>Derive same SK locally
 ```
 
-### Pre-Key Bundle Contents
-
 | Field | Source |
 | :--- | :--- |
-| `iKey` | Profile item |
-| `signedPreKey` | Profile item |
+| `userId` | Profile item (`pk` strip prefix) |
+| `deviceId` | Profile item |
+| `identityKey` | Profile item (`iKey`) |
+| `signedPreKey` | Profile item (`signedPreKey`) |
 | `signature` | Profile item (VXEdDSA signature of `signedPreKey`) |
 | `opk` | One OPK consumed from the `opks` list (removed after retrieval) |
 
