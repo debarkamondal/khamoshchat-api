@@ -1,112 +1,171 @@
 use aws_sdk_dynamodb::types::AttributeValue;
-use axum::{extract::State, http::StatusCode, Json};
-use base64::{engine::general_purpose, Engine as _};
-use libsignal_dezire::vxeddsa::vxeddsa_verify;
+use axum::{extract::State, Json};
 use serde::Deserialize;
+use std::collections::HashMap;
+use uuid::Uuid;
 
-use crate::state::AppState;
+use crate::{
+    crypto::verify_signed_signature,
+    db::{
+        keys::{device_sk, pending_reg_key, profile_sk, user_pk},
+        primary::transact_write_items,
+        temp::{delete_temp_key, get_temp_json},
+    },
+    error::AppError,
+    models::temp_registration::TempRegistration,
+    state::AppState,
+};
 
 #[derive(Deserialize)]
-pub struct RegisterFcmTokenRequest {
+#[serde(rename_all = "camelCase")]
+pub struct RegisterDeviceRequest {
+    pub user_id: String,
     pub phone: String,
-    #[serde(rename = "fcmToken")]
-    pub fcm_token: String,
-    pub signature: String,
-    pub vrf: String,
+    pub i_key: String,
+    pub signed_pre_key: String,
+    pub pre_key_sign: String,
+    pub pre_key_vrf: String,
+    #[serde(default)]
+    pub opks: Vec<String>,
+    pub signed_device_key: String,
+    pub dev_key_sign: String,
+    pub dev_key_vrf: String,
+    pub fcm_token: Option<String>,
 }
 
-// ─── POST /register/device/fcm ───
-
-pub async fn register_fcm_token(
+pub async fn register_device(
     State(state): State<AppState>,
-    Json(req): Json<RegisterFcmTokenRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    if req.phone.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Missing phone number".into(),
-        ));
-    }
+    Json(req): Json<RegisterDeviceRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    // 1. Fetch pending record from Redis
+    let redis_key = pending_reg_key(&req.user_id);
+    let pending_json = get_temp_json(&state, &redis_key).await?;
 
-    if req.fcm_token.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Missing fcmToken".into(),
-        ));
-    }
-
-    // ── Get the user to verify signature ──
-    let get_item_res = state
-        .dynamo
-        .get_item()
-        .table_name(&state.primary_table)
-        .key("pk", AttributeValue::S("user".to_string()))
-        .key("sk", AttributeValue::S(req.phone.clone()))
-        .send()
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to get user from DynamoDB");
-            (StatusCode::INTERNAL_SERVER_ERROR, "Database error".into())
-        })?;
-
-    let item = get_item_res.item.ok_or_else(|| {
-        tracing::warn!(phone = %req.phone, "User not found");
-        (StatusCode::UNAUTHORIZED, "User not found".into())
+    let pending_json = pending_json.ok_or_else(|| {
+        AppError::NotFound("Pending registration not found or expired".to_string())
     })?;
 
-    let signed_prekey = item
-        .get("signedPreKey")
-        .and_then(|v| v.as_s().ok())
-        .ok_or((StatusCode::UNAUTHORIZED, "Missing signed pre key for user".into()))?;
+    let pending_data: TempRegistration = serde_json::from_str(&pending_json)
+        .map_err(|e| AppError::Internal(format!("Corrupt pending registration data: {}", e)))?;
 
-    // ── Signature verification ──
-    let signed_prekey_bytes: [u8; 33] = general_purpose::STANDARD
-        .decode(signed_prekey)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid signed pre key base64".into()))?
-        .try_into()
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid signed pre key length".into()))?;
+    // Generate device_id server-side
+    let device_id = Uuid::new_v4().to_string();
 
-    let signature_bytes: [u8; 96] = general_purpose::STANDARD
-        .decode(&req.signature)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid signature base64".into()))?
-        .try_into()
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid signature length".into()))?;
+    // 2. Verify crypto
+    verify_signed_signature(
+        &req.i_key,
+        &req.signed_pre_key,
+        &req.pre_key_sign,
+        &req.pre_key_vrf,
+        "signedPreKey",
+    )?;
+    verify_signed_signature(
+        &req.i_key,
+        &req.signed_device_key,
+        &req.dev_key_sign,
+        &req.dev_key_vrf,
+        "signedDeviceKey",
+    )?;
 
-    let vrf_bytes: [u8; 32] = general_purpose::STANDARD
-        .decode(&req.vrf)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid vrf base64".into()))?
-        .try_into()
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid vrf length".into()))?;
+    // 3. Write to Primary Table (transact)
+    let pk = user_pk(&req.user_id);
+    let now_millis = pending_data.created_at;
 
-    // The signed message is the fcmToken string itself
-    match vxeddsa_verify(&signed_prekey_bytes, req.fcm_token.as_bytes(), &signature_bytes) {
-        Some(output) => {
-            if output != vrf_bytes {
-                tracing::warn!(phone = %req.phone, "VRF mismatch");
-                return Err((StatusCode::UNAUTHORIZED, "VRF mismatch".into()));
-            }
-        }
-        None => {
-            tracing::warn!(phone = %req.phone, "Invalid signature verification");
-            return Err((StatusCode::UNAUTHORIZED, "Invalid signature".into()));
-        }
+    // Profile Item
+    let mut profile_item = HashMap::new();
+    profile_item.insert("pk".to_string(), AttributeValue::S(pk.clone()));
+    profile_item.insert("sk".to_string(), AttributeValue::S(profile_sk()));
+    profile_item.insert("lookup".to_string(), AttributeValue::S(req.phone.clone()));
+
+    profile_item.insert("name".to_string(), AttributeValue::S(pending_data.name));
+    profile_item.insert("email".to_string(), AttributeValue::S(pending_data.email));
+    profile_item.insert("phone".to_string(), AttributeValue::S(req.phone));
+    if let Some(pic) = pending_data.picture {
+        profile_item.insert("picture".to_string(), AttributeValue::S(pic));
     }
 
-    // ── Update fcmToken in DB ──
-    state
-        .dynamo
-        .update_item()
-        .table_name(&state.primary_table)
-        .key("pk", AttributeValue::S("user".to_string()))
-        .key("sk", AttributeValue::S(req.phone.clone()))
-        .update_expression("SET fcmToken = :token")
-        .expression_attribute_values(":token", AttributeValue::S(req.fcm_token.clone()))
-        .send()
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to update fcmToken in DynamoDB");
-            (StatusCode::INTERNAL_SERVER_ERROR, "Database error".into())
-        })?;
+    profile_item.insert("iKey".to_string(), AttributeValue::S(req.i_key));
+    profile_item.insert(
+        "signedPreKey".to_string(),
+        AttributeValue::S(req.signed_pre_key),
+    );
+    profile_item.insert("signature".to_string(), AttributeValue::S(req.pre_key_sign));
 
-    Ok(StatusCode::NO_CONTENT)
+    if !req.opks.is_empty() {
+        let opks_attr: Vec<AttributeValue> = req
+            .opks
+            .into_iter()
+            .map(|opk| AttributeValue::S(opk))
+            .collect();
+        profile_item.insert("opks".to_string(), AttributeValue::L(opks_attr));
+    }
+    profile_item.insert(
+        "createdAt".to_string(),
+        AttributeValue::N(now_millis.to_string()),
+    );
+    // Device fields merged into profile (until multi-device is implemented)
+    profile_item.insert("deviceId".to_string(), AttributeValue::S(device_id.clone()));
+    profile_item.insert(
+        "signedDeviceKey".to_string(),
+        AttributeValue::S(req.signed_device_key.clone()),
+    );
+    if let Some(ref fcm) = req.fcm_token {
+        profile_item.insert("fcmToken".to_string(), AttributeValue::S(fcm.clone()));
+    }
+
+    // Device Item
+    let mut device_item = HashMap::new();
+    device_item.insert("pk".to_string(), AttributeValue::S(pk.clone()));
+    device_item.insert(
+        "sk".to_string(),
+        AttributeValue::S(device_sk(&device_id)),
+    );
+    device_item.insert(
+        "signedDeviceKey".to_string(),
+        AttributeValue::S(req.signed_device_key),
+    );
+    if let Some(fcm) = req.fcm_token {
+        device_item.insert("fcmToken".to_string(), AttributeValue::S(fcm));
+    }
+    device_item.insert(
+        "createdAt".to_string(),
+        AttributeValue::N(now_millis.to_string()),
+    );
+
+    // Transact write
+    transact_write_items(&state, vec![profile_item, device_item]).await?;
+
+    // 4. Delete Redis key
+    let _ = delete_temp_key(&state, &redis_key).await;
+
+    // 5. Response
+    Ok(Json(serde_json::json!({
+        "status": "success",
+        "userId": req.user_id,
+        "deviceId": device_id,
+    })))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateFcmTokenRequest {
+    pub device_id: String,
+    pub fcm_token: String,
+}
+
+pub async fn update_fcm_token(
+    State(state): State<AppState>,
+    auth_user: crate::auth::signature::AuthenticatedUser,
+    Json(req): Json<UpdateFcmTokenRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let pk = user_pk(&auth_user.user_id);
+    let sk = device_sk(&req.device_id);
+
+    // Update FCM token in DynamoDB
+    crate::db::primary::update_item_fcm(&state, &pk, &sk, &req.fcm_token).await?;
+
+    Ok(Json(serde_json::json!({
+        "status": "success",
+        "message": "FCM token updated",
+    })))
 }

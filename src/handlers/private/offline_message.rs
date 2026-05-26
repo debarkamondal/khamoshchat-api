@@ -1,7 +1,11 @@
-use crate::state::AppState;
 use axum::{body::Bytes, extract::State, http::StatusCode, response::IntoResponse};
-use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
+
+use crate::{
+    db::{keys::device_sk, primary::get_item},
+    push::fcm::send_push,
+    state::AppState,
+};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SubscriptionOptions {
@@ -203,7 +207,7 @@ pub enum WebhookPayload {
 }
 
 pub async fn handle_offline_message(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     body: Bytes,
 ) -> impl IntoResponse {
     let payload: WebhookPayload = match serde_json::from_slice(&body) {
@@ -214,22 +218,68 @@ pub async fn handle_offline_message(
         }
     };
 
-    match payload {
-        WebhookPayload::OfflineMessage { .. } => {
-            let json = serde_json::to_string_pretty(&payload)
-                .unwrap_or_else(|_| "Error serializing payload".to_string());
-            tracing::warn!("OFFLINE MESSAGE RECEIVED:\n{}", json);
-            // TODO: Store in DynamoDB
+    if let WebhookPayload::OfflineMessage { topic, payload: msg_payload, .. } = payload {
+        tracing::info!("Received offline message for topic: {}", topic);
+
+        // Topic format: /khamoshchat/{recipientId}/{recipientDeviceId}/{senderId}/{senderDeviceId}
+        // Split yields: ["", "khamoshchat", recipientId, recipientDeviceId, senderId, senderDeviceId]
+        let parts: Vec<&str> = topic.split('/').collect();
+        if parts.len() == 6 && parts[1] == "khamoshchat" {
+            let recipient_id = parts[2];
+            let recipient_device_id = parts[3];
+            let sender_id = parts[4];
+            let sender_device_id = parts[5];
+
+            tracing::info!(
+                "Offline message: recipient={}/{} sender={}/{}",
+                recipient_id, recipient_device_id, sender_id, sender_device_id
+            );
+
+            // 1. Fetch recipient's device to get FCM token
+            let pk = format!("USER#{}", recipient_id);
+            let sk = device_sk(recipient_device_id);
+
+            match get_item(&state, &pk, &sk).await {
+                Ok(Some(item)) => {
+                    let device = crate::models::device::Device::from(item);
+                    if let Some(fcm_token) = device.fcm_token {
+                        // 2. Dispatch Push Notification (data-only wake-up, no ciphertext)
+                        let push_payload = serde_json::json!({
+                            "type": "offline_message",
+                            "sender_id": sender_id,
+                            "sender_device_id": sender_device_id,
+                            "topic": topic,
+                        });
+
+                        let _ = send_push(&fcm_token, &push_payload).await.map_err(|e| {
+                            tracing::error!("Failed to send push notification: {:?}", e);
+                        });
+                    } else {
+                        tracing::warn!(
+                            "Device found but no FCM token: recipient={}/{}",
+                            recipient_id, recipient_device_id
+                        );
+                    }
+                }
+                Ok(None) => tracing::warn!(
+                    "Device not found for offline message: recipient={}/{}",
+                    recipient_id, recipient_device_id
+                ),
+                Err(e) => tracing::error!("Failed to fetch device: {:?}", e),
+            }
+
+            // 3. Store offline message in DynamoDB (Stubbed)
+            store_offline_message_stub(&topic, &msg_payload);
+        } else {
+            tracing::warn!("Invalid topic format for offline message: {}", topic);
         }
-        _ => {}
     }
 
+    // Always return OK to acknowledge webhook
     StatusCode::OK
 }
 
-fn decode_payload(payload: &str) -> String {
-    match general_purpose::STANDARD.decode(payload) {
-        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
-        Err(_) => "Error: Invalid Base64".to_string(),
-    }
+fn store_offline_message_stub(topic: &str, _payload: &str) {
+    tracing::info!("STUB: Storing offline message for topic: {}", topic);
+    // Real persistence logic goes here in a future milestone.
 }

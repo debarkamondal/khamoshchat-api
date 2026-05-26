@@ -1625,7 +1625,6 @@ dependencies = [
  "dotenvy",
  "jsonwebtoken",
  "libsignal-dezire",
- "rand",
  "redis",
  "reqwest",
  "serde",

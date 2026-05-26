@@ -46,8 +46,9 @@ COPY --from=builder /app/target/release/khamoshchat-api /app/khamoshchat-api
 RUN chown -R rocky:rocky /app
 USER rocky
 
-# Expose the API port
+# Expose the API ports
 EXPOSE 3000
+EXPOSE 3001
 
 # Run the application
 CMD ["/app/khamoshchat-api"]
