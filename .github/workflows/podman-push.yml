@@ -16,8 +16,8 @@ jobs:
         uses: https://code.forgejo.org/actions/docker-login@v1
         with:
           registry: codeberg.org
-          username: ${{ secrets.CODEBERG_USERNAME }}
-          password: ${{ secrets.CODEBERG_TOKEN }}
+          username: ${{ secrets.CB_USERNAME }}
+          password: ${{ secrets.CB_TOKEN }}
 
       # Set up Buildx (No duplicate mount error anymore!)
       - name: Set up Docker Buildx
