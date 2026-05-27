@@ -12,6 +12,9 @@ env:
 jobs:
   build-and-push:
     runs-on: personal-macbook
+    container:
+      image: node:24-bookworm
+      options: --privileged -v /var/run/docker.sock:/var/run/docker.sock
     permissions:
       contents: read
       packages: write
