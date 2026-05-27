@@ -1,58 +1,32 @@
-name: Build and Push OCI Image
+name: Build and Push Docker Image
 
-on:
-  push:
-    branches:
-      - '**'
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+on: [push]
 
 jobs:
-  build-and-push:
+  build:
+    # This triggers your runner label 'ubuntu-24.04:docker://node:24-bookworm'
     runs-on: personal-macbook
-    container:
-      image: node:24-bookworm
-      options: --privileged -v /var/run/docker.sock:/var/run/docker.sock
-    permissions:
-      contents: read
-      packages: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: https://code.forgejo.org/actions/checkout@v4
 
-      # - name: Set up QEMU
-      #   uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to the Container registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+      # Log into Codeberg Registry (or Docker Hub) if pushing
+      - name: Log into Codeberg Registry
+        uses: https://code.forgejo.org/actions/docker-login@v1
         with:
           registry: codeberg.org
-          username: ${{ secrets.CB_USERNAME }}
-          password: ${{ secrets.CB_TOKEN }}
+          username: ${{ secrets.CODEBERG_USERNAME }}
+          password: ${{ secrets.CODEBERG_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for OCI
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=raw,value=latest
+      # Set up Buildx (No duplicate mount error anymore!)
+      - name: Set up Docker Buildx
+        uses: https://github.com/docker/setup-buildx-action@v3
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
+      # Test the build
+      - name: Build and Push
+        uses: https://github.com/docker/build-push-action@v6
         with:
           context: .
-          file: ./Containerfile
-          # platforms: linux/amd64,linux/arm64
-          platforms: linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: true
+          tags: codeberg.org/${{ github.repository }}/my-app:latest
