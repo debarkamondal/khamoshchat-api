@@ -28,6 +28,7 @@ pub struct PreKeyBundle {
     pub signed_pre_key: String,
     pub signature: String,
     pub phone: Option<String>,
+    pub picture: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opk: Option<Opk>,
 }
@@ -69,11 +70,12 @@ pub async fn get_bundle(
 
         let profile = Profile::from(item);
 
-        let device_id = profile.device_id.unwrap_or_default();
+                let device_id = profile.device_id.unwrap_or_default();
         let identity_key = profile.identity_key.unwrap_or_default();
         let signed_pre_key = profile.signed_prekey.unwrap_or_default();
         let signature = profile.signature.unwrap_or_default();
         let phone = profile.phone;
+        let picture = profile.picture;
 
         // Get last OPK with its index
         let mut opk = None;
@@ -110,6 +112,7 @@ pub async fn get_bundle(
             signed_pre_key,
             signature,
             phone,
+            picture,
             opk,
         }));
     }

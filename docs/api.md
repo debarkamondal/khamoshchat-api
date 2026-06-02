@@ -105,13 +105,14 @@ Retrieves the cryptographic material required to start an E2EE session with a us
       "signedPreKey": "string (Base64 Signed Pre-Key)",
       "signature": "string (VXEdDSA Signature of signedPreKey)",
       "phone": "string (Phone number, optional)",
+      "picture": "string (Profile picture URL, optional)",
       "opk": {
         "id": 0,
         "key": "string (One-Time Pre-Key)"
       }
     }
     ```
-    *(Note: `phone` and `opk` are optional/nullable and may be null or skipped under certain conditions).*
+    *(Note: `phone`, `picture`, and `opk` are optional/nullable and may be null or skipped under certain conditions).*
 
 ---
 
