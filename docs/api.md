@@ -114,6 +114,23 @@ Retrieves the cryptographic material required to start an E2EE session with a us
     ```
     *(Note: `phone`, `picture`, and `opk` are optional/nullable and may be null or skipped under certain conditions).*
 
+### Get Sync Bundle
+Retrieves read-only profile and identity key data for syncing a user.
+
+- **Endpoint**: `GET /bundle/sync/{userId}`
+- **Auth**: Requires Stateless Signature Authentication (`X-User-Id`, `X-Timestamp`, `X-Signature`, `X-Vrf` headers).
+- **Description**: Fetches the user's public identity key and profile metadata without consuming a One-Time Pre-Key.
+- **Response**:
+    ```json
+    {
+      "userId": "uuid-string",
+      "identityKey": "base64-encoded-public-identity-key",
+      "picture": "https://...",
+      "displayName": "John Doe"
+    }
+    ```
+    *(Note: `picture` and `displayName` are nullable and may be returned as `null`.)*
+
 ---
 
 ## 3. Messaging

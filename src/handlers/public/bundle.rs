@@ -6,7 +6,10 @@ use serde::Serialize;
 
 use crate::{
     auth::signature::AuthenticatedUser,
-    db::{keys::user_pk, primary::{get_item, query_gsi_lookup, pop_opk}},
+    db::{
+        keys::user_pk,
+        primary::{get_item, pop_opk, query_gsi_lookup},
+    },
     error::AppError,
     models::profile::Profile,
     state::AppState,
@@ -33,6 +36,15 @@ pub struct PreKeyBundle {
     pub opk: Option<Opk>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncBundle {
+    pub user_id: String,
+    pub identity_key: String,
+    pub picture: Option<String>,
+    pub display_name: Option<String>,
+}
+
 pub async fn get_bundle(
     State(state): State<AppState>,
     Path(identifier): Path<String>,
@@ -57,20 +69,23 @@ pub async fn get_bundle(
             get_item(&state, &pk, "PROFILE").await?
         };
 
-        let item = profile_item_opt.ok_or_else(|| {
-            AppError::NotFound("Requested user not found".to_string())
-        })?;
+        let item = profile_item_opt
+            .ok_or_else(|| AppError::NotFound("Requested user not found".to_string()))?;
 
         // We got the profile. Ensure we know the pk to pop OPK later.
-        let pk = item.get("pk").and_then(|v| v.as_s().ok()).ok_or_else(|| {
-            AppError::Internal("Database error: missing pk on user profile".to_string())
-        })?.clone();
+        let pk = item
+            .get("pk")
+            .and_then(|v| v.as_s().ok())
+            .ok_or_else(|| {
+                AppError::Internal("Database error: missing pk on user profile".to_string())
+            })?
+            .clone();
 
         let user_id = pk.strip_prefix("USER#").unwrap_or(&pk).to_string();
 
         let profile = Profile::from(item);
 
-                let device_id = profile.device_id.unwrap_or_default();
+        let device_id = profile.device_id.unwrap_or_default();
         let identity_key = profile.identity_key.unwrap_or_default();
         let signed_pre_key = profile.signed_prekey.unwrap_or_default();
         let signature = profile.signature.unwrap_or_default();
@@ -82,7 +97,7 @@ pub async fn get_bundle(
         if !profile.opks.is_empty() {
             let last_index = profile.opks.len() - 1;
             let last_opk = profile.opks.last().unwrap().clone();
-            
+
             opk = Some(Opk {
                 id: last_index,
                 key: last_opk.clone(),
@@ -93,10 +108,15 @@ pub async fn get_bundle(
                 Err(AppError::Conflict(_)) => {
                     if retries > 0 {
                         retries -= 1;
-                        tracing::warn!("OPK conflict detected. Retrying get_bundle... Retries left: {}", retries);
+                        tracing::warn!(
+                            "OPK conflict detected. Retrying get_bundle... Retries left: {}",
+                            retries
+                        );
                         continue;
                     } else {
-                        return Err(AppError::Conflict("OPK conflict: too many retries".to_string()));
+                        return Err(AppError::Conflict(
+                            "OPK conflict: too many retries".to_string(),
+                        ));
                     }
                 }
                 Err(e) => {
@@ -116,4 +136,38 @@ pub async fn get_bundle(
             opk,
         }));
     }
+}
+
+pub async fn get_sync_bundle(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    _auth_user: AuthenticatedUser,
+) -> Result<Json<SyncBundle>, AppError> {
+    if user_id.is_empty() {
+        return Err(AppError::BadRequest("Missing userId".to_string()));
+    }
+
+    let pk = user_pk(&user_id);
+    let item = get_item(&state, &pk, "PROFILE")
+        .await?
+        .ok_or_else(|| AppError::NotFound("Requested user not found".to_string()))?;
+
+    let resolved_user_id = item
+        .get("pk")
+        .and_then(|v| v.as_s().ok())
+        .and_then(|pk| pk.strip_prefix("USER#"))
+        .unwrap_or(&user_id)
+        .to_string();
+
+    let profile = Profile::from(item);
+    let identity_key = profile
+        .identity_key
+        .ok_or_else(|| AppError::Internal("Database error: missing identity key".to_string()))?;
+
+    Ok(Json(SyncBundle {
+        user_id: resolved_user_id,
+        identity_key,
+        picture: profile.picture,
+        display_name: profile.name,
+    }))
 }

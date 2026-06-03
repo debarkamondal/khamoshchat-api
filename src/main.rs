@@ -38,6 +38,10 @@ async fn main() {
             post(handlers::public::bundle::get_bundle),
         )
         .route(
+            "/bundle/sync/{userId}",
+            get(handlers::public::bundle::get_sync_bundle),
+        )
+        .route(
             "/register/device",
             post(handlers::public::device::register_device),
         )
