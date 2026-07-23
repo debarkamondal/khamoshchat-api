@@ -2,8 +2,11 @@ use axum::{body::Bytes, extract::State, http::StatusCode, response::IntoResponse
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    db::{keys::device_sk, primary::get_item},
-    push::fcm::send_push,
+    db::{
+        keys::device_sk,
+        primary::{clear_device_fcm_token, get_item, put_offline_message},
+    },
+    push::{provider::PushError, WakeUpPayload},
     state::AppState,
 };
 
@@ -235,28 +238,44 @@ pub async fn handle_offline_message(
                 recipient_id, recipient_device_id, sender_id, sender_device_id
             );
 
-            // 1. Fetch recipient's device to get FCM token
             let pk = format!("USER#{}", recipient_id);
             let sk = device_sk(recipient_device_id);
 
+            // 1. Fetch recipient's device record to resolve push token
             match get_item(&state, &pk, &sk).await {
                 Ok(Some(item)) => {
                     let device = crate::models::device::Device::from(item);
-                    if let Some(fcm_token) = device.fcm_token {
-                        // 2. Dispatch Push Notification (data-only wake-up, no ciphertext)
-                        let push_payload = serde_json::json!({
-                            "type": "offline_message",
-                            "sender_id": sender_id,
-                            "sender_device_id": sender_device_id,
-                            "topic": topic,
-                        });
 
-                        let _ = send_push(&fcm_token, &push_payload).await.map_err(|e| {
-                            tracing::error!("Failed to send push notification: {:?}", e);
-                        });
+                    // 2. Dispatch data-only wake-up push (no ciphertext forwarded)
+                    if let Some(push_token) = device.push_token() {
+                        let wake_payload = WakeUpPayload {
+                            sender_id: sender_id.to_string(),
+                            sender_device_id: sender_device_id.to_string(),
+                            topic: topic.clone(),
+                        };
+
+                        match state.push_provider.send(&push_token, &wake_payload).await {
+                            Ok(()) => {
+                                tracing::info!(
+                                    "Push notification sent to recipient={}/{}",
+                                    recipient_id, recipient_device_id
+                                );
+                            }
+                            Err(PushError::TokenInvalid) => {
+                                // Token is stale (app uninstalled / token rotated) — clean up DB
+                                tracing::warn!(
+                                    "Push token invalid for recipient={}/{}, clearing from DB",
+                                    recipient_id, recipient_device_id
+                                );
+                                let _ = clear_device_fcm_token(&state, &pk, &sk).await;
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to send push notification: {}", e);
+                            }
+                        }
                     } else {
                         tracing::warn!(
-                            "Device found but no FCM token: recipient={}/{}",
+                            "No push token registered for recipient={}/{}",
                             recipient_id, recipient_device_id
                         );
                     }
@@ -268,18 +287,24 @@ pub async fn handle_offline_message(
                 Err(e) => tracing::error!("Failed to fetch device: {:?}", e),
             }
 
-            // 3. Store offline message in DynamoDB (Stubbed)
-            store_offline_message_stub(&topic, &msg_payload);
+            // 3. Persist offline message in DynamoDB for reliable retrieval on reconnect
+            if let Err(e) = put_offline_message(
+                &state,
+                recipient_id,
+                sender_id,
+                sender_device_id,
+                &topic,
+                &msg_payload,
+            )
+            .await
+            {
+                tracing::error!("Failed to persist offline message: {:?}", e);
+            }
         } else {
             tracing::warn!("Invalid topic format for offline message: {}", topic);
         }
     }
 
-    // Always return OK to acknowledge webhook
+    // Always return 200 OK to acknowledge the webhook to RMQTT broker
     StatusCode::OK
-}
-
-fn store_offline_message_stub(topic: &str, _payload: &str) {
-    tracing::info!("STUB: Storing offline message for topic: {}", topic);
-    // Real persistence logic goes here in a future milestone.
 }

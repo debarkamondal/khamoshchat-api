@@ -99,12 +99,13 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
                 }
                 
                 // Redis replay protection (Only for FCM update endpoint, 10 seconds TTL)
+                // Uses atomic SET NX to eliminate the check-then-set race condition.
                 if parts.uri.path() == "/register/device/fcm" {
                     let replay_key = format!("replay:sig:{}", signature_b64);
-                    if let Some(_) = crate::db::temp::get_temp_json(state, &replay_key).await? {
+                    let was_set = crate::db::temp::set_temp_json_nx(state, &replay_key, "1", 10).await?;
+                    if !was_set {
                         return Err(AppError::Unauthorized("Replay attack detected".to_string()));
                     }
-                    crate::db::temp::set_temp_json(state, &replay_key, "1", 10).await?;
                 }
 
                 Ok(AuthenticatedUser {

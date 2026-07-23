@@ -1,11 +1,21 @@
+use std::sync::Arc;
+
 use aws_sdk_dynamodb::Client as DynamoClient;
 use redis::aio::ConnectionManager;
+
+use crate::push::provider::PushProvider;
 
 /// Shared application state passed to all Axum handlers via `State`.
 #[derive(Clone)]
 pub struct AppState {
     pub dynamo: DynamoClient,
     pub redis: ConnectionManager,
+    /// Shared HTTP client with connection pooling — reused for all outbound
+    /// requests (Google JWKS, FCM, etc.) to avoid per-request TLS handshakes.
+    pub http_client: reqwest::Client,
+    /// Push notification provider resolved at startup (FCM now, APNs in future).
+    /// Handlers dispatch through this trait — no provider-specific code in handlers.
+    pub push_provider: Arc<dyn PushProvider>,
     pub primary_table: String,
     pub gsi_lookup_index: String,
     pub google_client_id: String,
@@ -58,9 +68,20 @@ impl AppState {
         let google_redirect_uri =
             std::env::var("GOOGLE_REDIRECT_URI").expect("GOOGLE_REDIRECT_URI must be set");
 
+        tracing::info!("Initializing shared HTTP client...");
+        let http_client = reqwest::Client::builder()
+            .build()
+            .expect("Failed to build HTTP client");
+
+        tracing::info!("Initializing push notification provider...");
+        let push_provider: Arc<dyn PushProvider> =
+            Arc::new(crate::push::fcm::FcmProvider::from_env(http_client.clone()));
+
         Self {
             dynamo,
             redis,
+            http_client,
+            push_provider,
             primary_table,
             gsi_lookup_index,
             google_client_id,

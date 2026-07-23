@@ -34,3 +34,4 @@ uuid = { version = "1", features = ["v4"] }
 urlencoding = "2"
 dotenvy = "0.15"
 jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
+async-trait = "0.1"

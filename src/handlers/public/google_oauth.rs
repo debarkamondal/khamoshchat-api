@@ -44,29 +44,41 @@ pub async fn verify_id_token(
     }
 
     if jwks.is_none() {
-        let client = reqwest::Client::new();
-        let resp = client
-            .get("https://www.googleapis.com/oauth2/v3/certs")
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to fetch JWKS: {}", e);
-                AppError::BadGateway(format!("Failed to fetch JWKS: {}", e))
-            })?;
-        let fetched_jwks: jsonwebtoken::jwk::JwkSet = resp
-            .json()
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to parse JWKS: {}", e);
-                AppError::BadGateway(format!("Failed to parse JWKS: {}", e))
-            })?;
-        jwks = Some(fetched_jwks.clone());
+        // Double-checked locking: acquire write lock, then re-check before fetching.
+        // This ensures only one concurrent request fires the outbound JWKS HTTP call
+        // when the cache expires ("thundering herd" prevention).
         let mut cache = state.google_jwks.write().await;
-        cache.0 = SystemTime::now()
+        let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        cache.1 = Some(fetched_jwks);
+
+        if cache.1.is_some() && now - cache.0 < 3600 {
+            // Another concurrent request already refreshed the cache while we waited
+            // for the write lock — reuse it.
+            jwks = cache.1.clone();
+        } else {
+            // Cache is still stale — we are the one request that fetches it.
+            // Use the shared HTTP client to reuse the existing TLS connection pool.
+            let resp = state.http_client
+                .get("https://www.googleapis.com/oauth2/v3/certs")
+                .send()
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to fetch JWKS: {}", e);
+                    AppError::BadGateway(format!("Failed to fetch JWKS: {}", e))
+                })?;
+            let fetched_jwks: jsonwebtoken::jwk::JwkSet = resp
+                .json()
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to parse JWKS: {}", e);
+                    AppError::BadGateway(format!("Failed to parse JWKS: {}", e))
+                })?;
+            jwks = Some(fetched_jwks.clone());
+            cache.0 = now;
+            cache.1 = Some(fetched_jwks);
+        }
     }
 
     let jwks = jwks.unwrap();
