@@ -14,7 +14,7 @@ If not using `devenv`, ensure you have:
 - **Rust**: `1.75+`
 - **Redis**: For temporary session storage.
 - **RMQTT**: For real-time MQTT message routing.
-- **DynamoDB**: The API currently connects to the AWS region specified in `.env`. To use a local DynamoDB, you must update the AWS SDK initialization in `src/db/mod.rs`.
+- **DynamoDB**: The API currently connects to the AWS region specified in `.env`. To use a local DynamoDB, you must update the AWS SDK initialization in `src/state.rs`.
 
 ### Running with Docker Compose
 To spin up all supporting services (Redis, RMQTT):
@@ -79,6 +79,6 @@ docker run -d \
 
 ### Production Considerations
 - **Network Isolation**: Port 3001 (Private API) must **not** be exposed to the internet. It is for internal backend services only (e.g., RMQTT webhooks). Use firewall rules or network policies to restrict access.
-- **AWS Permissions**: Ensure the production environment has an IAM role with `dynamodb:PutItem`, `dynamodb:GetItem`, and `dynamodb:UpdateItem` permissions on the primary table.
+- **AWS Permissions**: Ensure the production environment has an IAM role with `dynamodb:PutItem`, `dynamodb:GetItem`, `dynamodb:UpdateItem`, `dynamodb:Query`, and `dynamodb:TransactWriteItems` permissions on the primary table.
 - **Secrets**: Use a secret manager for Google Client secrets and AWS credentials.
 - **RMQTT Hooks**: The API relies on RMQTT webhooks for handling message delivery states. Ensure the RMQTT configuration in `devenv/rmqtt/` is correctly mirrored in production.

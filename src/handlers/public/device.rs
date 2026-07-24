@@ -33,6 +33,8 @@ pub struct RegisterDeviceRequest {
     pub fcm_token: Option<String>,
 }
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 pub async fn register_device(
     State(state): State<AppState>,
     Json(req): Json<RegisterDeviceRequest>,
@@ -47,9 +49,6 @@ pub async fn register_device(
 
     let pending_data: TempRegistration = serde_json::from_str(&pending_json)
         .map_err(|e| AppError::Internal(format!("Corrupt pending registration data: {}", e)))?;
-
-    // Generate device_id server-side
-    let device_id = Uuid::new_v4().to_string();
 
     // 2. Verify crypto
     verify_signed_signature(
@@ -67,20 +66,54 @@ pub async fn register_device(
         "signedDeviceKey",
     )?;
 
-    // 3. Write to Primary Table (transact)
+    // 3. Check for existing profile to preserve device_id / createdAt if re-registering
     let pk = user_pk(&req.user_id);
-    let now_millis = pending_data.created_at;
+    let existing_profile_opt = crate::db::primary::get_item(&state, &pk, &profile_sk()).await?;
+
+    let (device_id, created_at, existing_picture) = if let Some(ref existing) = existing_profile_opt {
+        let dev_id = existing
+            .get("deviceId")
+            .and_then(|v| v.as_s().ok())
+            .cloned()
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+        let created = existing
+            .get("createdAt")
+            .and_then(|v| v.as_n().ok())
+            .and_then(|n| n.parse::<u64>().ok())
+            .unwrap_or(pending_data.created_at);
+
+        let pic = existing
+            .get("picture")
+            .and_then(|v| v.as_s().ok())
+            .cloned();
+
+        (dev_id, created, pic)
+    } else {
+        (Uuid::new_v4().to_string(), pending_data.created_at, None)
+    };
+
+    let now_millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
 
     // Profile Item
     let mut profile_item = HashMap::new();
     profile_item.insert("pk".to_string(), AttributeValue::S(pk.clone()));
     profile_item.insert("sk".to_string(), AttributeValue::S(profile_sk()));
-    profile_item.insert("lookup".to_string(), AttributeValue::S(req.phone.clone()));
+
+    let lookup_val = if !pending_data.email.is_empty() {
+        pending_data.email.clone()
+    } else {
+        req.phone.clone()
+    };
+    profile_item.insert("lookup".to_string(), AttributeValue::S(lookup_val));
 
     profile_item.insert("name".to_string(), AttributeValue::S(pending_data.name));
     profile_item.insert("email".to_string(), AttributeValue::S(pending_data.email));
     profile_item.insert("phone".to_string(), AttributeValue::S(req.phone));
-    if let Some(pic) = pending_data.picture {
+    if let Some(pic) = pending_data.picture.or(existing_picture) {
         profile_item.insert("picture".to_string(), AttributeValue::S(pic));
     }
 
@@ -101,6 +134,10 @@ pub async fn register_device(
     }
     profile_item.insert(
         "createdAt".to_string(),
+        AttributeValue::N(created_at.to_string()),
+    );
+    profile_item.insert(
+        "updatedAt".to_string(),
         AttributeValue::N(now_millis.to_string()),
     );
     // Device fields merged into profile (until multi-device is implemented)
@@ -129,6 +166,10 @@ pub async fn register_device(
     }
     device_item.insert(
         "createdAt".to_string(),
+        AttributeValue::N(created_at.to_string()),
+    );
+    device_item.insert(
+        "updatedAt".to_string(),
         AttributeValue::N(now_millis.to_string()),
     );
 

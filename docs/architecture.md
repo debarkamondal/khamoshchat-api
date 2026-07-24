@@ -48,7 +48,7 @@ We use a single DynamoDB table to store all entities, utilizing the Partition Ke
 | :--- | :--- | :--- | :--- |
 | **Profile** | `USER#<userId>` | `PROFILE` | Basic info (name, email, iKey, signedPreKey, signature), with device fields (deviceId, signedDeviceKey, fcmToken) consolidated directly inside this item (until multi-device is supported). |
 | **Device** | `USER#<userId>` | `DEVICE#<deviceId>` | Device-specific signed key and FCM tokens (written under `DEVICE#<deviceId>` for future multi-device support, but fetched directly from Profile during key discovery & webhook lookup). |
-| **Lookup** | `LOOKUP#<phone>` | `PROFILE` | (GSI) Allows finding `userId` via phone number. |
+| **Lookup** | `email` or `phone` | `PROFILE` | (GSI `lookup-index`) Allows finding `userId` via email or phone number. |
 
 ### Temporary Storage (Redis)
 Redis is used for short-lived state, primarily during the registration handoff:
@@ -71,6 +71,12 @@ sequenceDiagram
     C->>S: POST /register/google/id_token<br/>{idToken}
     S->>G: Verify token against JWKS
     G-->>S: Claims (email, name, picture)
+    S->>D: Lookup existing profile by email
+    alt Existing user
+        D-->>S: Existing userId
+    else New user
+        Note over S: Generate new userId (UUID)
+    end
     S->>R: Store claims with TTL 10 min<br/>key: reg:pending:{userId}
     S-->>C: {userId}
     end
@@ -80,12 +86,17 @@ sequenceDiagram
     Note over C: Generate iKey, signedPreKey,<br/>signedDeviceKey, OPKs locally
     Note over C: VXEdDSA sign both keys with iKey
     C->>S: POST /register/device<br/>{userId, phone, iKey, signedPreKey, preKeySign,<br/>preKeyVrf, signedDeviceKey, devKeySign,<br/>devKeyVrf, opks}
-    Note over S: Generate deviceId (UUID)
     S->>R: Fetch pending claims
     R-->>S: {name, email, picture}
+    S->>D: Check for existing profile
+    alt Existing profile (re-registration)
+        Note over S: Preserve createdAt & existing deviceId
+    else New profile
+        Note over S: Generate new deviceId (UUID) & createdAt
+    end
     Note over S: Verify #1: signedPreKey sig + VRF
     Note over S: Verify #2: signedDeviceKey sig + VRF
-    S->>D: TransactWriteItems<br/>[Profile, Device]<br/>(Device fields consolidated inside Profile)
+    S->>D: TransactWriteItems<br/>[Profile, Device]<br/>(Update bundle keys & device info in place)
     S->>R: Delete pending key
     S-->>C: {status: success, userId, deviceId}
     end
@@ -94,13 +105,19 @@ sequenceDiagram
 ### Phase 1: OAuth Verification
 1. Client sends a Google `idToken` to `/register/google/id_token`.
 2. Server verifies the token with Google's JWKS.
-3. Server generates a `userId`, stores claims in Redis, and returns the `userId` to the client.
+3. Server queries DynamoDB GSI (`lookup-index`) by `claims.email`:
+   - If an existing profile is found, the existing `userId` is reused.
+   - If no profile is found, a new `userId` (UUID) is generated.
+4. Server stores claims in Redis under `reg:pending:{userId}` and returns `userId` to the client.
 
 ### Phase 2: Device & Key Setup
 1. Client generates cryptographic keys locally.
-2. Client sends `userId`, `phone`, `iKey`, `signedPreKey`, `preKeySign`, `preKeyVrf`, `signedDeviceKey`, `devKeySign`, `devKeyVrf`, and `opks` to `/register/device`. (The client does **not** supply a device ID).
-3. Server generates a new `deviceId` (UUID) and performs **dual VXEdDSA verification**: validates the signature and VRF for both the signed pre-key and the signed device key against the Identity Key.
-4. Server retrieves claims from Redis, and commits the Profile and Device items to DynamoDB in a single transaction. Device credentials (`deviceId`, `signedDeviceKey`, `fcmToken`) are consolidated directly inside the Profile item for redundant lookup elimination, while also writing the Device item under the `DEVICE#<deviceId>` key for future multi-device capability. VRF outputs are verified but **not persisted**.
+2. Client sends `userId`, `phone`, `iKey`, `signedPreKey`, `preKeySign`, `preKeyVrf`, `signedDeviceKey`, `devKeySign`, `devKeyVrf`, and `opks` to `/register/device`.
+3. Server checks DynamoDB for an existing profile under `USER#<userId>`:
+   - For re-registering users, it reuses the existing `deviceId` and preserves original `createdAt` metadata.
+   - For new users, it generates a new `deviceId` (UUID) and `createdAt` timestamp.
+4. Server performs **dual VXEdDSA verification**: validates the signature and VRF for both the signed pre-key and the signed device key against the Identity Key.
+5. Server retrieves claims from Redis and commits the updated Profile and Device items to DynamoDB in a single transaction. VRF outputs are verified but **not persisted**.
 
 > For detailed verification flowcharts, see [Cryptographic Flows](cryptographic_flows.md#2-registration-dual-key-verification).
 

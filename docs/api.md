@@ -36,7 +36,7 @@ Private API endpoints have **no client-facing authentication**. They are intende
 ## 1. Registration Flow
 
 ### Verify Google ID Token
-Verifies a Google OAuth token and creates a temporary registration session.
+Verifies a Google OAuth token and creates a temporary registration session. If a user with the Google email already exists, their existing `userId` is returned so their pre-key bundle can be updated on re-registration.
 
 - **Endpoint**: `POST /register/google/id_token`
 - **Request Body**:
@@ -57,7 +57,7 @@ Verifies a Google OAuth token and creates a temporary registration session.
     ```
 
 ### Register Device & Keys
-Finalizes registration by uploading the device's cryptographic public keys.
+Finalizes registration (or re-registration) by uploading the device's cryptographic public keys. If `userId` belongs to an existing user profile, their identity keys and device records are updated in place in DynamoDB without creating duplicate user entries.
 
 - **Endpoint**: `POST /register/device`
 - **Request Body**:
@@ -95,7 +95,7 @@ Retrieves the cryptographic material required to start an E2EE session with a us
 
 - **Endpoint**: `POST /bundle/{identifier}`
 - **Auth**: Requires Stateless Signature Authentication (`X-User-Id`, `X-Timestamp`, `X-Signature`, `X-Vrf` headers).
-- **Description**: Fetches the profile and a single One-Time Pre-Key for the given user identifier (`user_id` or phone).
+- **Description**: Fetches the profile and a single One-Time Pre-Key for the given user identifier (`user_id`, email, or phone).
 - **Response**:
     ```json
     {

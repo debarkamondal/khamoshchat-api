@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::{
-    db::{keys::pending_reg_key, temp::set_temp_json},
+    db::{keys::pending_reg_key, primary::query_gsi_lookup, temp::set_temp_json},
     error::AppError,
     models::temp_registration::TempRegistration,
     state::AppState,
@@ -122,8 +122,18 @@ pub async fn verify_id_token(
         return Err(AppError::Unauthorized("Google email not verified".into()));
     }
 
-    // ── 2. Generate userId and write to Redis ──
-    let user_id = Uuid::new_v4().to_string();
+    // ── 2. Reuse existing userId if profile exists for claims.email, otherwise generate new userId ──
+    let existing_profile = query_gsi_lookup(&state, &claims.email).await?;
+    let user_id = if let Some(ref item) = existing_profile {
+        item.get("pk")
+            .and_then(|v| v.as_s().ok())
+            .and_then(|pk| pk.strip_prefix("USER#"))
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| Uuid::new_v4().to_string())
+    } else {
+        Uuid::new_v4().to_string()
+    };
+
     let now_millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
