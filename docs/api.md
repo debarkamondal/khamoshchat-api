@@ -10,200 +10,210 @@ The Nijhum API is split into two distinct logical services running on separate p
 ## Authentication
 
 ### Open Endpoints (Public API)
-Endpoints for registration do not require client authentication:
+Endpoints for registration do not require signature authentication:
 - `POST /register/google/id_token` — validated via Google's JWKS.
-- `POST /register/device` — validated via VXEdDSA dual-key verification at the application level.
+- `POST /register/device` — validated via VXEdDSA dual-key verification in the payload itself.
 
 ### Authenticated Endpoints (Public API)
 
 Endpoints that operate on existing client data or perform key discovery require **Stateless Signature Authentication**. The middleware verifies the caller's identity before the request reaches the handler.
-- Clients must include the following headers:
-    - `X-User-Id`: The user's ID.
-    - `X-Timestamp`: Current UTC timestamp in milliseconds.
-    - `X-Signature`: A Base64 VXEdDSA signature of `userId + timestamp`.
-    - `X-Vrf`: A Base64 VRF output corresponding to the signature.
-- **Drift Tolerance**: The `X-Timestamp` must be within **±10 seconds** of the server's current UTC time.
-- **Replay Protection**: Requests to `/register/device/fcm` are protected by a **10-second Redis-backed replay cache** that tracks signature uniqueness. Replayed requests are rejected with `401 Unauthorized`.
-- **Applies to**:
-    - `POST /bundle/{identifier}` — Key discovery (retrieves public key bundle).
-    - `POST /register/device/fcm` — Updates the device FCM token.
 
-### Internal Endpoints (Private API — Port 3001)
-Private API endpoints have **no client-facing authentication**. They are intended to be called only by trusted backend services (e.g., RMQTT broker) and must be network-isolated from public traffic.
+- **Required Headers**:
+  - `X-User-Id`: The user's ID (UUID).
+  - `X-Timestamp`: Current UTC timestamp in milliseconds.
+  - `X-Signature`: A Base64 VXEdDSA signature of `userId + timestamp`.
+  - `X-Vrf`: A Base64 VRF output corresponding to the signature.
+- **Drift Tolerance**: The `X-Timestamp` must be within **±10 seconds** of the server's current UTC time.
+- **Replay Protection**: Critical endpoints (like `POST /register/device/fcm`) are protected by a **10-second Redis-backed replay cache** that tracks signature uniqueness. Replayed requests are rejected with `401 Unauthorized`.
 
 ---
 
 ## 1. Registration Flow
 
 ### Verify Google ID Token
-Verifies a Google OAuth token and creates a temporary registration session. If a user with the Google email already exists, their existing `userId` is returned so their pre-key bundle can be updated on re-registration.
+Verifies a Google OAuth token and creates a temporary registration session in Redis. If a user with the Google email already exists, their existing `userId` is returned.
 
 - **Endpoint**: `POST /register/google/id_token`
 - **Request Body**:
-    ```json
-    {
-      "idToken": "string"
-    }
-    ```
-- **Response**:
+  ```json
+  {
+    "idToken": "string (JWT)"
+  }
+  ```
+- **Example cURL**:
+  ```bash
+  curl -X POST http://localhost:3000/register/google/id_token \
+       -H "Content-Type: application/json" \
+       -d '{"idToken": "eyJhb..."}'
+  ```
+- **Responses**:
+  - `200 OK`: 
     ```json
     {
       "status": "success",
-      "userId": "string (UUID)",
-      "email": "string",
-      "name": "string (optional)",
-      "picture": "string (optional)"
+      "userId": "uuid-string",
+      "email": "user@gmail.com",
+      "name": "User Name",
+      "picture": "https://..."
     }
     ```
+  - `400 Bad Request`: Missing token.
+  - `401 Unauthorized`: Invalid or expired JWT, or wrong audience.
+  - `500 Internal Server Error`: Could not fetch Google JWKS.
 
 ### Register Device & Keys
-Finalizes registration (or re-registration) by uploading the device's cryptographic public keys. If `userId` belongs to an existing user profile, their identity keys and device records are updated in place in DynamoDB without creating duplicate user entries.
+Finalizes registration (or re-registration) by uploading the device's cryptographic public keys.
 
 - **Endpoint**: `POST /register/device`
 - **Request Body**:
-    ```json
-    {
-      "userId": "string",
-      "phone": "string",
-      "iKey": "string (Base64 Identity Key)",
-      "signedPreKey": "string (Base64 Signed Pre-Key)",
-      "preKeySign": "string (VXEdDSA Signature of signedPreKey)",
-      "preKeyVrf": "string (VRF output from signedPreKey signature)",
-      "opks": ["string (One-Time Pre-Keys)"],
-      "signedDeviceKey": "string (Base64 Signed Device Key)",
-      "devKeySign": "string (VXEdDSA Signature of signedDeviceKey)",
-      "devKeyVrf": "string (VRF output from signedDeviceKey signature)",
-      "fcmToken": "string (Optional)"
-    }
-    ```
-- **Response**:
+  ```json
+  {
+    "userId": "string",
+    "phone": "string (optional)",
+    "iKey": "string (Base64)",
+    "signedPreKey": "string (Base64)",
+    "preKeySign": "string (Base64 VXEdDSA Signature)",
+    "preKeyVrf": "string (Base64 VRF output)",
+    "opks": ["string (Base64)", "..."],
+    "signedDeviceKey": "string (Base64)",
+    "devKeySign": "string (Base64 VXEdDSA Signature)",
+    "devKeyVrf": "string (Base64 VRF output)",
+    "fcmToken": "string (optional)"
+  }
+  ```
+- **Example cURL**:
+  ```bash
+  curl -X POST http://localhost:3000/register/device \
+       -H "Content-Type: application/json" \
+       -d '{"userId": "123", "iKey": "...", ...}'
+  ```
+- **Responses**:
+  - `200 OK`:
     ```json
     {
       "status": "success",
-      "userId": "string",
-      "deviceId": "string"
+      "userId": "uuid-string",
+      "deviceId": "uuid-string"
     }
     ```
-- **Verification**: The server performs VXEdDSA verification on **both** the signed pre-key and the signed device key. Each signature must produce a VRF output matching the provided `preKeyVrf` / `devKeyVrf`.
+  - `401 Unauthorized`: VXEdDSA signature or VRF validation failed for either key.
+  - `404 Not Found`: Pending registration expired or missing in Redis.
+  - `500 Internal Server Error`: DynamoDB write failure.
 
 ---
 
 ## 2. Key Discovery
 
 ### Get Pre-Key Bundle
-Retrieves the cryptographic material required to start an E2EE session with a user.
+Retrieves the cryptographic material required to start an E2EE session with a user. This consumes one One-Time Pre-Key (OPK) from the recipient.
 
-- **Endpoint**: `POST /bundle/{identifier}`
-- **Auth**: Requires Stateless Signature Authentication (`X-User-Id`, `X-Timestamp`, `X-Signature`, `X-Vrf` headers).
-- **Description**: Fetches the profile and a single One-Time Pre-Key for the given user identifier (`user_id`, email, or phone).
-- **Response**:
-    ```json
-    {
-      "userId": "string",
-      "deviceId": "string",
-      "identityKey": "string (Base64 Identity Key)",
-      "signedPreKey": "string (Base64 Signed Pre-Key)",
-      "signature": "string (VXEdDSA Signature of signedPreKey)",
-      "phone": "string (Phone number, optional)",
-      "picture": "string (Profile picture URL, optional)",
-      "opk": {
-        "id": 0,
-        "key": "string (One-Time Pre-Key)"
-      }
-    }
-    ```
-    *(Note: `phone`, `picture`, and `opk` are optional/nullable and may be null or skipped under certain conditions).*
-
-### Get Sync Bundle
-Retrieves read-only profile and identity key data for syncing a user.
-
-- **Endpoint**: `GET /bundle/sync/{userId}`
-- **Auth**: Requires Stateless Signature Authentication (`X-User-Id`, `X-Timestamp`, `X-Signature`, `X-Vrf` headers).
-- **Description**: Fetches the user's public identity key and profile metadata without consuming a One-Time Pre-Key.
-- **Response**:
+- **Endpoint**: `POST /bundle/{identifier}` (identifier can be `userId`, email, or phone)
+- **Auth**: Requires Stateless Signature Authentication.
+- **Example cURL**:
+  ```bash
+  curl -X POST http://localhost:3000/bundle/bob@example.com \
+       -H "X-User-Id: alice-uuid" \
+       -H "X-Timestamp: 1690000000000" \
+       -H "X-Signature: base64-sig" \
+       -H "X-Vrf: base64-vrf"
+  ```
+- **Responses**:
+  - `200 OK`:
     ```json
     {
       "userId": "uuid-string",
-      "identityKey": "base64-encoded-public-identity-key",
+      "deviceId": "uuid-string",
+      "identityKey": "base64-string",
+      "signedPreKey": "base64-string",
+      "signature": "base64-string",
+      "phone": "+1234567890",
+      "picture": "https://...",
+      "opk": {
+        "id": 0,
+        "key": "base64-string"
+      }
+    }
+    ```
+  - `401 Unauthorized`: Invalid caller signature.
+  - `404 Not Found`: Target user not found, or they have no OPKs remaining.
+  - `409 Conflict`: High concurrency prevented OPK extraction (client should retry).
+
+### Get Sync Bundle
+Retrieves read-only profile and identity key data for syncing a user, without consuming an OPK.
+
+- **Endpoint**: `GET /bundle/sync/{userId}`
+- **Auth**: Requires Stateless Signature Authentication.
+- **Example cURL**:
+  ```bash
+  curl -X GET http://localhost:3000/bundle/sync/bob-uuid \
+       -H "X-User-Id: alice-uuid" \
+       -H "X-Timestamp: 1690000000000" \
+       -H "X-Signature: base64-sig" \
+       -H "X-Vrf: base64-vrf"
+  ```
+- **Responses**:
+  - `200 OK`:
+    ```json
+    {
+      "userId": "uuid-string",
+      "identityKey": "base64-string",
       "picture": "https://...",
       "displayName": "John Doe"
     }
     ```
-    *(Note: `picture` and `displayName` are nullable and may be returned as `null`.)*
+  - `401 Unauthorized`: Invalid caller signature.
+  - `404 Not Found`: User not found.
 
 ---
 
-## 3. Messaging
-
-### MQTT Topic Schema
-
-Messages are published directly to the MQTT broker by clients. The broker delivers them in real-time when the recipient is online, or stores them for offline delivery.
-
-**Topic format:**
-```
-/nijhum/{recipient_id}/{recipient_device_id}/{sender_id}/{sender_device_id}
-```
-
-**Subscriber patterns (used by clients):**
-
-| Pattern | Receives |
-| :--- | :--- |
-| `/nijhum/{recipient_id}/#` | All messages for that user across all devices |
-| `/nijhum/{recipient_id}/{recipient_device_id}/#` | Messages targeting a specific device only |
-
-**Message payload**: Opaque encrypted ciphertext. The server never inspects or decrypts it.
-
----
-
-### MQTT Offline Message Webhook (Internal)
-When a subscriber is offline, the MQTT broker fires a webhook to the private API to trigger a push notification.
-
-- **Endpoint**: `POST /offline_message`
-- **Port**: 3001 (Private — broker-to-server only, not client-facing)
-- **Caller**: RMQTT broker (`rmqtt-web-hook` plugin)
-- **Request Body** (broker-generated):
-    ```json
-    {
-      "action": "offline_message",
-      "from_node": 1001,
-      "from_ipaddress": "127.0.0.1",
-      "from_clientid": "string",
-      "from_username": "string",
-      "node": 1001,
-      "ipaddress": "127.0.0.1",
-      "clientid": "string",
-      "username": "string",
-      "dup": false,
-      "retain": false,
-      "qos": 1,
-      "topic": "/nijhum/{recipient_id}/{recipient_device_id}/{sender_id}/{sender_device_id}",
-      "packet_id": "string (optional)",
-      "payload": "string (Encrypted ciphertext, base64)",
-      "pts": 1234567890,
-      "ts": 1234567890,
-      "time": "string (ISO timestamp)"
-    }
-    ```
-- **Behaviour**: Extracts `recipient_id` and `recipient_device_id` from the topic, looks up the device's `fcm_token`, and sends a data-only push notification. The ciphertext is **not** forwarded in the push.
-
----
-
-## 4. Device Management (Authenticated)
+## 3. Device Management (Authenticated)
 
 ### Update FCM Token
 Updates the Firebase Cloud Messaging token for a specific device.
 
 - **Endpoint**: `POST /register/device/fcm`
-- **Port**: 3000 (Public API — client-facing)
-- **Auth**: Requires Stateless Signature Authentication (`X-User-Id`, `X-Timestamp`, `X-Signature`, `X-Vrf` headers).
+- **Auth**: Requires Stateless Signature Authentication.
 - **Request Body**:
-    ```json
-    {
-      "deviceId": "string",
-      "fcmToken": "string"
-    }
-    ```
+  ```json
+  {
+    "deviceId": "string",
+    "fcmToken": "string"
+  }
+  ```
+- **Example cURL**:
+  ```bash
+  curl -X POST http://localhost:3000/register/device/fcm \
+       -H "X-User-Id: user-uuid" \
+       -H "X-Timestamp: 1690000000000" \
+       -H "X-Signature: base64-sig" \
+       -H "X-Vrf: base64-vrf" \
+       -H "Content-Type: application/json" \
+       -d '{"deviceId": "dev-uuid", "fcmToken": "new-token-..."}'
+  ```
 - **Responses**:
-    - `200 OK`: `{"status": "success", "message": "FCM token updated"}`
-    - `401 Unauthorized`: If the signature is invalid, timestamp drift is >10 seconds, or a signature replay is detected.
-    - `404 Not Found`: If the device is not registered (guarantees no ghost devices are created in DynamoDB).
+  - `200 OK`: `{"status": "success", "message": "FCM token updated"}`
+  - `401 Unauthorized`: Invalid signature, timestamp drift, or replay attack detected.
+  - `404 Not Found`: Device not found in DynamoDB.
+
+---
+
+## 4. Internal API (Port 3001)
+
+### MQTT Offline Message Webhook
+Triggered by the RMQTT broker when a message arrives for an offline subscriber. Parses the topic to extract the recipient ID and sends a data-only FCM push notification to wake the device.
+
+- **Endpoint**: `POST /offline_message`
+- **Caller**: RMQTT broker (`rmqtt-web-hook` plugin)
+- **Request Body** (truncated for clarity):
+  ```json
+  {
+    "action": "offline_message",
+    "topic": "/nijhum/{recipient_id}/{recipient_device_id}/{sender_id}/{sender_device_id}",
+    "payload": "base64-encrypted-ciphertext",
+    ...
+  }
+  ```
+- **Responses**:
+  - `200 OK`: Push notification sent successfully, or no FCM token on file.
+  - `400 Bad Request`: Malformed topic string.
+  - `500 Internal Server Error`: FCM API failure or DynamoDB error.

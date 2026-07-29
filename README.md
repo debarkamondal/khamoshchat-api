@@ -1,74 +1,137 @@
 # Nijhum API
 
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Platform](https://img.shields.io/badge/Arch-amd64%20%7C%20arm64-lightgrey)]()
 
-Nijhum API is a high-performance, **Zero-Trust, End-to-End Encrypted (E2EE)** messaging backend built with Rust and Axum. It serves as the backbone for the Nijhum ecosystem, facilitating secure message routing and identity management without ever having access to users' private cryptographic keys.
+The backend server for the [Nijhum](https://github.com/nijhum-in) encrypted messaging ecosystem. Built with Rust and Axum, it operates as a **Zero-Trust** infrastructure — the server routes messages, manages identities, and serves key bundles, but **never sees plaintext messages or private keys**.
 
-## 🚀 Key Features
+## Where This Fits
 
-*   **Zero-Trust Architecture**: The server never sees plaintext messages or private keys.
-*   **E2EE Messaging**: Full support for the Signal Protocol (X3DH) for establishing secure sessions.
-*   **Identity Management**: Transitioned to a generic identity model supporting Individuals (OAuth/Google) and multiple Devices.
-*   **Signature-Based Auth**: Stateless authentication using cryptographic signatures instead of traditional sessions or JWTs.
-*   **Single-Table Design**: Optimized DynamoDB schema for high scalability and low latency.
-*   **Push Notifications**: Integrated FCM support for reliable message delivery alerts.
+```mermaid
+graph TD
+    subgraph "Client"
+        MOBILE["Nijhum Mobile"]
+    end
 
-## 🛠 Tech Stack
+    subgraph "Native Modules"
+        OAUTH["expo-google-native-oauth"]
+        CRYPTO["expo-libsignal-dezire"]
+    end
 
-*   **Language**: [Rust](https://www.rust-lang.org/) (Axum framework)
-*   **Database**: [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) (Single-Table Design)
-*   **Cache/Temp State**: [Redis](https://redis.io/)
-*   **Messaging**: [RMQTT](https://rmqtt.io/) (MQTT Broker for real-time delivery)
-*   **Infrastructure**: Docker, AWS SDK for Rust
+    subgraph "Backend"
+        API["⭐ Nijhum API (this server)"]
+        REDIS["Redis"]
+        RMQTT["RMQTT Broker"]
+        DYNAMO["DynamoDB"]
+    end
 
-## 🚦 Quick Start
+    subgraph "Core Crypto"
+        LIB["libsignal-dezire"]
+    end
+
+    MOBILE -->|"idToken"| OAUTH
+    OAUTH -.->|"POST /register/google/id_token"| API
+    MOBILE -->|"crypto keys"| CRYPTO
+    CRYPTO --> LIB
+    MOBILE -->|"REST + MQTT"| API
+    API --> REDIS
+    API --> DYNAMO
+    API -->|"cargo dep"| LIB
+    RMQTT -->|"webhook"| API
+    MOBILE <-->|"encrypted messages"| RMQTT
+```
+
+## What This Server Does
+
+The Nijhum API has **three roles**:
+
+1. **Identity Registry** — Verifies Google OAuth tokens, creates user profiles, and stores cryptographic public keys in DynamoDB. It never generates keys — clients do that locally.
+
+2. **Pre-Key Bundle Server** — When Alice wants to message Bob, she asks the server for Bob's public key bundle. The server hands it over. Alice then performs the X3DH key exchange locally — the server is not involved in the computation.
+
+3. **Offline Push Gateway** — When a message arrives via MQTT but the recipient is offline, the RMQTT broker fires a webhook to the API. The API looks up the recipient's FCM token and sends a data-only push notification to wake the device (no message content is included in the push).
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| **Language** | [Rust](https://www.rust-lang.org/) (Axum framework) |
+| **Database** | [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) (Single-Table Design) |
+| **Cache** | [Redis](https://redis.io/) (pending registrations, replay protection) |
+| **Message Broker** | [RMQTT](https://rmqtt.io/) (MQTT broker for real-time delivery) |
+| **Crypto** | [libsignal-dezire](https://github.com/nijhum-in/libsignal-dezire) (VXEdDSA verification) |
+| **Push** | Firebase Cloud Messaging (FCM) |
+| **Container** | OCI-compliant image via GitHub Container Registry |
+
+---
+
+## Quick Start
 
 ### Prerequisites
-*   Docker & Docker Compose
-*   Rust (latest stable)
-*   `devenv` (optional, for local development environment)
 
-### Local Development Setup
-1.  Clone the repository.
-2.  Copy `.env.example` to `.env` and fill in your AWS and Google OAuth credentials.
-3.  Start the supporting services:
-    ```bash
-    docker-compose up -d
-    ```
-4.  Run the API:
-    ```bash
-    cargo run
-    ```
+- **Rust** 1.75+ (`rustup update`)
+- **Docker & Docker Compose** (for Redis and RMQTT)
+- **AWS credentials** (for DynamoDB — or use DynamoDB Local)
 
-## 🐳 Deployment
+### Local Development
 
-The Nijhum API is distributed as a container image via the GitHub Container Registry (GHCR).
+```bash
+# 1. Clone
+git clone https://github.com/nijhum-in/nijhum-api.git
+cd nijhum-api
+
+# 2. Configure environment
+cp .env.example .env
+# Edit .env with your AWS, Google OAuth, and Redis credentials
+
+# 3. Start supporting services
+docker-compose up -d   # Starts Redis + RMQTT
+
+# 4. Run the API
+cargo run
+# Public API starts on port 3000
+# Private API starts on port 3001
+```
 
 ### Running with Docker
-You can pull and run the latest production image:
 
 ```bash
 docker pull ghcr.io/nijhum-in/nijhum-api:latest
 docker run -p 3000:3000 -p 3001:3001 --env-file .env ghcr.io/nijhum-in/nijhum-api:latest
 ```
 
-### Supported Architectures
 Images are available for both `linux/amd64` and `linux/arm64`.
 
-## 📖 Documentation
+---
 
-Detailed documentation is available in the `docs/` directory:
+## Documentation
 
-*   [**Architecture Guide**](docs/architecture.md): Deep dive into the security model, identity system, and database patterns.
-*   [**Cryptographic Flows**](docs/cryptographic_flows.md): Detailed VXEdDSA verification, registration signatures, and stateless auth flows.
-*   [**API Reference**](docs/api.md): Complete list of endpoints, request/response schemas, and authentication methods.
-*   [**Development Guide**](docs/development.md): How to contribute, run tests, and deploy the application.
+Start with the concepts guide, then explore the detailed docs:
 
-## 🔒 Security
+| Document | What it covers |
+|----------|---------------|
+| [**Concepts Guide**](docs/concepts.md) | Start here — Zero-Trust philosophy, identity model, registration and messaging flows explained narratively |
+| [**Architecture Guide**](docs/architecture.md) | System architecture — DynamoDB schema, MQTT topic design, infrastructure, environment variables |
+| [**Cryptographic Flows**](docs/cryptographic_flows.md) | Detailed Mermaid diagrams of VXEdDSA verification, registration, auth, and X3DH flows |
+| [**API Reference**](docs/api.md) | Complete endpoint documentation with request/response schemas and cURL examples |
+| [**Development Guide**](docs/development.md) | Local setup, project structure, testing, and deployment |
 
-Nijhum is designed with a security-first mindset. If you discover any security vulnerabilities, please refer to our [Security Policy](SECURITY.md) (coming soon).
+---
 
-## 📄 License
+## Security
+
+Nijhum is designed with a security-first mindset. The server operates on a Zero-Trust model:
+
+- **No plaintext access** — Messages are opaque ciphertext; the server never decrypts them.
+- **No private keys** — All key generation happens on the client. The server only stores public keys.
+- **Signature-based auth** — No JWTs or sessions. Every authenticated request is verified with VXEdDSA signatures.
+- **VRF integrity** — Registration and auth both verify VRF outputs, proving the signer holds the private key.
+
+If you discover security vulnerabilities, please refer to our [Security Policy](SECURITY.md) (coming soon).
+
+---
+
+## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
