@@ -1,20 +1,30 @@
 # Development & Deployment Guide
 
-This guide provides instructions for setting up the KhamoshChat API development environment and deploying it to production.
+This guide provides instructions for setting up the Nijhum API development environment and deploying it to production.
 
-## 1. Local Development Setup
+---
 
-### Using `devenv`
-The project includes a `devenv` configuration for a reproducible development environment.
-1. Install [devenv](https://devenv.sh/).
-2. Run `devenv shell` to enter the environment with all dependencies pre-installed.
+## 🛠 Local Development Setup
 
-### Manual Setup
-If not using `devenv`, ensure you have:
-- **Rust**: `1.75+`
-- **Redis**: For temporary session storage.
-- **RMQTT**: For real-time MQTT message routing.
-- **DynamoDB**: The API currently connects to the AWS region specified in `.env`. To use a local DynamoDB, you must update the AWS SDK initialization in `src/state.rs`.
+### Prerequisites
+*   **Rust**: Version 1.75 or higher (`rustup update`)
+*   **Docker & Docker Compose**: For local Redis and RMQTT services
+*   **AWS Account** (optional): Access to Amazon DynamoDB (or use DynamoDB Local)
+
+### 1. Clone & Configure
+```bash
+git clone https://github.com/nijhum-in/nijhum-api.git
+cd nijhum-api
+cp .env.example .env
+```
+
+Edit `.env` to configure your local settings.
+
+---
+
+## 🐳 Docker / OCI Deployment
+
+The Nijhum API is packaged as an OCI-compliant container image, distributed via the GitHub Container Registry.
 
 ### Running with Docker Compose
 To spin up all supporting services (Redis, RMQTT):
@@ -56,7 +66,7 @@ Ensure any changes to these modules are accompanied by unit tests.
 
 ## 4. Deployment
 
-The KhamoshChat API is packaged as an OCI-compliant container image, distributed via the GitHub Container Registry.
+The Nijhum API is packaged as an OCI-compliant container image, distributed via the GitHub Container Registry.
 
 ### Using the Container Image
 

@@ -43,7 +43,7 @@ Nijhum API is a high-performance, **Zero-Trust, End-to-End Encrypted (E2EE)** me
 
 ## 🐳 Deployment
 
-The KhamoshChat API is distributed as a container image via the GitHub Container Registry (GHCR).
+The Nijhum API is distributed as a container image via the GitHub Container Registry (GHCR).
 
 ### Running with Docker
 You can pull and run the latest production image:
@@ -67,7 +67,7 @@ Detailed documentation is available in the `docs/` directory:
 
 ## 🔒 Security
 
-KhamoshChat is designed with a security-first mindset. If you discover any security vulnerabilities, please refer to our [Security Policy](SECURITY.md) (coming soon).
+Nijhum is designed with a security-first mindset. If you discover any security vulnerabilities, please refer to our [Security Policy](SECURITY.md) (coming soon).
 
 ## 📄 License
 

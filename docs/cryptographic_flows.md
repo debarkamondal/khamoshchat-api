@@ -1,6 +1,6 @@
-# Cryptographic Flows
+# Cryptographic Operations & Flows
 
-This document details the cryptographic operations and verification flows used by KhamoshChat. All signatures use the **VXEdDSA** scheme, which produces both a cryptographic signature and a Verifiable Random Function (VRF) output.
+This document details the cryptographic operations and verification flows used by Nijhum. All signatures use the **VXEdDSA** scheme, which produces both a cryptographic signature and a Verifiable Random Function (VRF) output.
 
 ---
 

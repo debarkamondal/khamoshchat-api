@@ -1,6 +1,6 @@
 # API Reference
 
-The KhamoshChat API is split into two distinct logical services running on separate ports.
+The Nijhum API is split into two distinct logical services running on separate ports.
 
 - **Public API (Port 3000)**: Client-facing — registration, key discovery, and authenticated device management.
 - **Private API (Port 3001)**: Internal only — **not exposed to clients**. Receives backend webhooks (e.g., RMQTT offline message notifications). Must be firewalled from external traffic.

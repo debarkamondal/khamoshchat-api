@@ -1,6 +1,6 @@
 # Architecture & Design Guide
 
-KhamoshChat is built on the principle of **Zero-Trust**. This document outlines how the system achieves security, scalability, and flexibility.
+Nijhum is built on the principle of **Zero-Trust**. This document outlines how the system achieves security, scalability, and flexibility.
 
 ## 1. Security Model (Zero-Trust & E2EE)
 
@@ -42,7 +42,7 @@ The system has moved from a phone-number-centric model to a generic identity mod
 
 We use a single DynamoDB table to store all entities, utilizing the Partition Key (`pk`) and Sort Key (`sk`) to model relationships.
 
-### Primary Table Patterns (`khamoshchat-identity`)
+### Primary Table Patterns (`nijhum-identity`)
 
 | Entity | Partition Key (`pk`) | Sort Key (`sk`) | Description |
 | :--- | :--- | :--- | :--- |
