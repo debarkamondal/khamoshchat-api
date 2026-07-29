@@ -141,15 +141,15 @@ Messages are published directly to the MQTT broker by clients. The broker delive
 
 **Topic format:**
 ```
-/khamoshchat/{recipient_id}/{recipient_device_id}/{sender_id}/{sender_device_id}
+/nijhum/{recipient_id}/{recipient_device_id}/{sender_id}/{sender_device_id}
 ```
 
 **Subscriber patterns (used by clients):**
 
 | Pattern | Receives |
 | :--- | :--- |
-| `/khamoshchat/{recipient_id}/#` | All messages for that user across all devices |
-| `/khamoshchat/{recipient_id}/{recipient_device_id}/#` | Messages targeting a specific device only |
+| `/nijhum/{recipient_id}/#` | All messages for that user across all devices |
+| `/nijhum/{recipient_id}/{recipient_device_id}/#` | Messages targeting a specific device only |
 
 **Message payload**: Opaque encrypted ciphertext. The server never inspects or decrypts it.
 
@@ -176,7 +176,7 @@ When a subscriber is offline, the MQTT broker fires a webhook to the private API
       "dup": false,
       "retain": false,
       "qos": 1,
-      "topic": "/khamoshchat/{recipient_id}/{recipient_device_id}/{sender_id}/{sender_device_id}",
+      "topic": "/nijhum/{recipient_id}/{recipient_device_id}/{sender_id}/{sender_device_id}",
       "packet_id": "string (optional)",
       "payload": "string (Encrypted ciphertext, base64)",
       "pts": 1234567890,

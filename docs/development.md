@@ -62,7 +62,7 @@ The KhamoshChat API is packaged as an OCI-compliant container image, distributed
 
 #### Pulling the Image
 ```bash
-docker pull ghcr.io/debarkamondal/khamoshchat-api:latest
+docker pull ghcr.io/nijhum-in/nijhum-api:latest
 ```
 
 #### Running the Container
@@ -70,11 +70,11 @@ Ensure your `.env` file is configured with the necessary AWS and Redis credentia
 
 ```bash
 docker run -d \
-  --name khamoshchat-api \
+  --name nijhum-api \
   -p 3000:3000 \
   -p 3001:3001 \
   --env-file .env \
-  ghcr.io/debarkamondal/khamoshchat-api:latest
+  ghcr.io/nijhum-in/nijhum-api:latest
 ```
 
 ### Production Considerations

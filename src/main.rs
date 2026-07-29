@@ -81,8 +81,8 @@ async fn main() {
         .await
         .expect(&format!("Failed to bind to private port {}", private_port));
 
-    tracing::info!("Starting KhamoshChat public API on {}", public_addr);
-    tracing::info!("Starting KhamoshChat private API on {}", private_addr);
+    tracing::info!("Starting Nijhum public API on {}", public_addr);
+    tracing::info!("Starting Nijhum private API on {}", private_addr);
 
     // Run both servers concurrently
     let public_server =
@@ -92,7 +92,7 @@ async fn main() {
 
     let _ = tokio::join!(public_server, private_server);
 
-    tracing::info!("KhamoshChat API servers have stopped.");
+    tracing::info!("Nijhum API servers have stopped.");
 }
 
 async fn shutdown_signal() {

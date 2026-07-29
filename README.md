@@ -1,9 +1,9 @@
-# KhamoshChat API
+# Nijhum API
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-KhamoshChat API is a high-performance, **Zero-Trust, End-to-End Encrypted (E2EE)** messaging backend built with Rust and Axum. It serves as the backbone for the KhamoshChat ecosystem, facilitating secure message routing and identity management without ever having access to users' private cryptographic keys.
+Nijhum API is a high-performance, **Zero-Trust, End-to-End Encrypted (E2EE)** messaging backend built with Rust and Axum. It serves as the backbone for the Nijhum ecosystem, facilitating secure message routing and identity management without ever having access to users' private cryptographic keys.
 
 ## 🚀 Key Features
 
@@ -49,8 +49,8 @@ The KhamoshChat API is distributed as a container image via the GitHub Container
 You can pull and run the latest production image:
 
 ```bash
-docker pull ghcr.io/debarkamondal/khamoshchat-api:latest
-docker run -p 3000:3000 -p 3001:3001 --env-file .env ghcr.io/debarkamondal/khamoshchat-api:latest
+docker pull ghcr.io/nijhum-in/nijhum-api:latest
+docker run -p 3000:3000 -p 3001:3001 --env-file .env ghcr.io/nijhum-in/nijhum-api:latest
 ```
 
 ### Supported Architectures

@@ -303,7 +303,7 @@ sequenceDiagram
     participant F as Firebase (FCM)
     participant B as Recipient
 
-    A->>M: Publish encrypted message to<br/>/khamoshchat/{recipient_id}/<br/>{recipient_device_id}/{sender_id}/{sender_device_id}
+    A->>M: Publish encrypted message to<br/>/nijhum/{recipient_id}/<br/>{recipient_device_id}/{sender_id}/{sender_device_id}
 
     alt Recipient is online
         M-->>B: Deliver message in real-time

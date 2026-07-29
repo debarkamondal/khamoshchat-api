@@ -125,20 +125,24 @@ sequenceDiagram
 
 All messages are routed through the MQTT broker. The API server **never sees plaintext**; it only handles delivery bookkeeping.
 
+## 🛰 MQTT Real-Time Layer
+
+Message routing is handled by an **RMQTT broker** running alongside the API. MQTT is used purely as a **transport channel** — authentication, session authorization, and offline delivery storage are enforced by the API via webhook integrations.
+
 ### Topic Schema
 
 ```
-/khamoshchat/{recipient_id}/{recipient_device_id}/{sender_id}/{sender_device_id}
+/nijhum/{recipient_id}/{recipient_device_id}/{sender_id}/{sender_device_id}
 ```
 
 All four IDs are embedded in the topic, making the routing information self-describing and avoiding any server-side lookup to determine delivery intent.
 
-### Subscription Patterns
+### Subscriptions
 
-| Client subscribes to | Effect |
+| Subscription Pattern | Purpose |
 | :--- | :--- |
-| `/khamoshchat/{recipient_id}/#` | Receives messages across all of the user's devices (multi-device sync) |
-| `/khamoshchat/{recipient_id}/{recipient_device_id}/#` | Receives messages targeting only this specific device |
+| `/nijhum/{recipient_id}/#` | Receives messages across all of the user's devices (multi-device sync) |
+| `/nijhum/{recipient_id}/{recipient_device_id}/#` | Receives messages targeting only this specific device |
 
 ### Offline Delivery
 
