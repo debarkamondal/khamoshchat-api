@@ -1644,7 +1644,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 [[package]]
 name = "libsignal-dezire"
 version = "0.1.146"
-source = "git+https://github.com/debarkamondal/libsignal-dezire#9fe80b65e1f7bc76e44ec912a99824acb6cc4118"
+source = "git+https://github.com/nijhum-in/libsignal-dezire#222bc4e02faff0a14bec02223c3622a4d32f6762"
 dependencies = [
  "aes",
  "aes-gcm",
