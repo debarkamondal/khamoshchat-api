@@ -77,11 +77,11 @@ Registration is a two-phase handshake. Phase 1 verifies the user's identity via 
 
 ### Phase 1: "Who are you?" (OAuth Verification)
 
-Alice installs the Nijhum app and taps "Sign In with Google."
+Alice installs the DeezChatz app and taps "Sign In with Google."
 
 1. The app triggers the native Google Sign-In flow (via `expo-google-native-oauth`).
 2. Google returns an `idToken` — a JWT containing Alice's email, name, and profile picture.
-3. The app sends this `idToken` to the Nijhum API: `POST /register/google/id_token`.
+3. The app sends this `idToken` to the DeezChatz API: `POST /register/google/id_token`.
 4. The server verifies the token against Google's JWKS (public key set).
 5. The server checks DynamoDB for an existing profile with Alice's email:
    - **Existing user?** → Reuse the existing `userId`.
@@ -124,7 +124,7 @@ Alice wants to message Bob for the first time. They don't share a secret yet, an
    - Initializes a Double Ratchet session.
 3. **Alice encrypts her message** using the Double Ratchet and publishes it via MQTT to:
    ```
-   /nijhum/{bob_id}/{bob_device_id}/{alice_id}/{alice_device_id}
+   /deezchatz/{bob_id}/{bob_device_id}/{alice_id}/{alice_device_id}
    ```
 4. **Bob receives the message** (if online) or reconnects and receives it (if offline).
 5. **Bob performs the matching X3DH** to derive the same shared secret and initializes his Double Ratchet session.

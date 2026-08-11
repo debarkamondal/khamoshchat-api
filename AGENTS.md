@@ -1,27 +1,27 @@
-# AGENTS.md — Nijhum API
+# AGENTS.md — DeezChatz API
 
 This document provides instructions and context for AI coding agents working in this repository.
 
 ## Ecosystem Context
 
-> **This is the Nijhum backend.** It manages identities, serves key bundles, and handles offline message notifications. It operates on a Zero-Trust model — it never sees plaintext messages and never generates cryptographic keys.
+> **This is the DeezChatz backend.** It manages identities, serves key bundles, and handles offline message notifications. It operates on a Zero-Trust model — it never sees plaintext messages and never generates cryptographic keys.
 
 ```
-nijhum-mobile  →  REST (port 3000)  →  ⭐ Nijhum API (this server)
-RMQTT Broker   →  Webhook (port 3001) →  ⭐ Nijhum API
+deezchatz-mobile  →  REST (port 3000)  →  ⭐ DeezChatz API (this server)
+RMQTT Broker      →  Webhook (port 3001) →  ⭐ DeezChatz API
 ```
 
 | Relationship | Details |
 |-------------|---------|
 | **Depends on** | `libsignal-dezire` via cargo git dependency |
-| **Used by** | `nijhum-mobile` (via REST API) |
+| **Used by** | `deezchatz-mobile` (via REST API) |
 | **Integrates with** | Google OAuth (for JWT verification) and Firebase Cloud Messaging (for push notifications) |
 
 ### Cross-Repo Impact Rules
 
 - **If you change `crypto.rs` verification logic**: Ensure it stays in sync with how `libsignal-dezire` generates VXEdDSA signatures and VRFs.
-- **If you change the JSON payload schemas (`src/models/payload.rs`)**: You MUST notify that `nijhum-mobile`'s API client needs to be updated.
-- **If you change the MQTT topic schema**: You MUST update `nijhum-mobile`'s subscription logic and the RMQTT webhook configuration.
+- **If you change the JSON payload schemas (`src/models/payload.rs`)**: You MUST notify that `deezchatz-mobile`'s API client needs to be updated.
+- **If you change the MQTT topic schema**: You MUST update `deezchatz-mobile`'s subscription logic and the RMQTT webhook configuration.
 
 ---
 
