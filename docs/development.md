@@ -1,6 +1,6 @@
 # Development & Deployment Guide
 
-This guide provides instructions for setting up the Nijhum API development environment from scratch, understanding the project structure, and deploying it to production.
+This guide provides instructions for setting up the DeezChatz API development environment from scratch, understanding the project structure, and deploying it to production.
 
 ---
 
@@ -24,15 +24,15 @@ Follow these steps to get the API running locally, even if you're starting with 
 ### 2. Clone & Configure
 
 ```bash
-git clone https://github.com/nijhum-in/nijhum-api.git
-cd nijhum-api
+git clone https://github.com/deez-in/deezchatz-api.git
+cd deezchatz-api
 cp .env.example .env
 ```
 
 Edit `.env` to configure your settings:
 - `AWS_REGION`: e.g., `ap-south-1`
 - `REDIS_URL`: `redis://localhost:6379`
-- `PRIMARY_TABLE`: e.g., `nijhum-identity`
+- `PRIMARY_TABLE`: e.g., `deezchatz-identity`
 - `GOOGLE_CLIENT_ID`: Your Google OAuth Web Client ID
 
 ### 3. Start Supporting Services
@@ -119,12 +119,12 @@ cargo test -- --nocapture
 
 ## 🚀 Deployment
 
-The Nijhum API is packaged as an OCI-compliant container image, distributed via the GitHub Container Registry. Images are built for both `linux/amd64` and `linux/arm64`.
+The DeezChatz API is packaged as an OCI-compliant container image, distributed via the GitHub Container Registry. Images are built for both `linux/amd64` and `linux/arm64`.
 
 ### 1. Pulling the Image
 
 ```bash
-docker pull ghcr.io/nijhum-in/nijhum-api:latest
+docker pull ghcr.io/deez-in/deezchatz-api:latest
 ```
 
 ### 2. Running the Container
@@ -133,11 +133,11 @@ Ensure your `.env` file is configured with the necessary production credentials.
 
 ```bash
 docker run -d \
-  --name nijhum-api \
+  --name deezchatz-api \
   -p 3000:3000 \
   -p 3001:3001 \
   --env-file .env \
-  ghcr.io/nijhum-in/nijhum-api:latest
+  ghcr.io/deez-in/deezchatz-api:latest
 ```
 
 ### Production Considerations (CRITICAL)

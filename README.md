@@ -1,17 +1,17 @@
-# Nijhum API
+# DeezChatz API 🚀
 
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Arch-amd64%20%7C%20arm64-lightgrey)]()
 
-The backend server for the [Nijhum](https://github.com/nijhum-in) encrypted messaging ecosystem. Built with Rust and Axum, it operates as a **Zero-Trust** infrastructure — the server routes messages, manages identities, and serves key bundles, but **never sees plaintext messages or private keys**.
+The backend engine behind the [DeezChatz](https://github.com/deez-in) encrypted messaging ecosystem. Built with Rust and Axum, it operates on a strict **Zero-Trust** policy — we route messages, verify keys, and trigger push notifications, but we **never** touch your plaintext or private keys. Why? Because ain't nobody reading Deez Chatz. Your messages belong to nobody but you and yours truly. Here at 'Deez', we don't hoard data — storing useless logs costs real money and burns trees, and frankly... ain't nobody paying cloud bills to host your 3 AM chatzzzz. 🔒🔥
 
 ## Where This Fits
 
 ```mermaid
 graph TD
     subgraph "Client"
-        MOBILE["Nijhum Mobile"]
+        MOBILE["DeezChatz Mobile"]
     end
 
     subgraph "Native Modules"
@@ -20,7 +20,7 @@ graph TD
     end
 
     subgraph "Backend"
-        API["⭐ Nijhum API (this server)"]
+        API["⭐ DeezChatz API (this server)"]
         REDIS["Redis"]
         RMQTT["RMQTT Broker"]
         DYNAMO["DynamoDB"]
@@ -44,13 +44,13 @@ graph TD
 
 ## What This Server Does
 
-The Nijhum API has **three roles**:
+The DeezChatz API handles **three main jobs**:
 
-1. **Identity Registry** — Verifies Google OAuth tokens, creates user profiles, and stores cryptographic public keys in DynamoDB. It never generates keys — clients do that locally.
+1. **Identity Registry** — Verifies Google OAuth tokens, creates user profiles, and stores public keys in DynamoDB. No private keys ever touch the server.
 
-2. **Pre-Key Bundle Server** — When Alice wants to message Bob, she asks the server for Bob's public key bundle. The server hands it over. Alice then performs the X3DH key exchange locally — the server is not involved in the computation.
+2. **Pre-Key Bundle Server** — Serves public pre-key bundles so clients can perform X3DH key exchanges locally without the server meddling.
 
-3. **Offline Push Gateway** — When a message arrives via MQTT but the recipient is offline, the RMQTT broker fires a webhook to the API. The API looks up the recipient's FCM token and sends a data-only push notification to wake the device (no message content is included in the push).
+3. **Offline Push Gateway** — When a message hits the MQTT broker while the receiver is offline, RMQTT pings the API via webhook to trigger a data-only FCM push notification to wake the client up.
 
 ## Tech Stack
 
@@ -60,7 +60,7 @@ The Nijhum API has **three roles**:
 | **Database** | [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) (Single-Table Design) |
 | **Cache** | [Redis](https://redis.io/) (pending registrations, replay protection) |
 | **Message Broker** | [RMQTT](https://rmqtt.io/) (MQTT broker for real-time delivery) |
-| **Crypto** | [libsignal-dezire](https://github.com/nijhum-in/libsignal-dezire) (VXEdDSA verification) |
+| **Crypto** | [libsignal-dezire](https://github.com/deez-in/libsignal-dezire) (VXEdDSA verification) |
 | **Push** | Firebase Cloud Messaging (FCM) |
 | **Container** | OCI-compliant image via GitHub Container Registry |
 
@@ -78,8 +78,8 @@ The Nijhum API has **three roles**:
 
 ```bash
 # 1. Clone
-git clone https://github.com/nijhum-in/nijhum-api.git
-cd nijhum-api
+git clone https://github.com/deez-in/deezchatz-api.git
+cd deezchatz-api
 
 # 2. Configure environment
 cp .env.example .env
@@ -97,8 +97,8 @@ cargo run
 ### Running with Docker
 
 ```bash
-docker pull ghcr.io/nijhum-in/nijhum-api:latest
-docker run -p 3000:3000 -p 3001:3001 --env-file .env ghcr.io/nijhum-in/nijhum-api:latest
+docker pull ghcr.io/deez-in/deezchatz-api:latest
+docker run -p 3000:3000 -p 3001:3001 --env-file .env ghcr.io/deez-in/deezchatz-api:latest
 ```
 
 Images are available for both `linux/amd64` and `linux/arm64`.
@@ -121,7 +121,7 @@ Start with the concepts guide, then explore the detailed docs:
 
 ## Security
 
-Nijhum is designed with a security-first mindset. The server operates on a Zero-Trust model:
+DeezChatz is designed with a security-first mindset. The server operates on a Zero-Trust model:
 
 - **No plaintext access** — Messages are opaque ciphertext; the server never decrypts them.
 - **No private keys** — All key generation happens on the client. The server only stores public keys.

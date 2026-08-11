@@ -1,10 +1,10 @@
 # Cryptographic Operations & Flows
 
-This document details the exact cryptographic operations and verification flows used by the Nijhum API. It serves as a technical reference for how the server handles keys, verifies signatures, and facilitates key exchange.
+This document details the exact cryptographic operations and verification flows used by the DeezChatz API. It serves as a technical reference for how the server handles keys, verifies signatures, and facilitates key exchange.
 
 For a narrative explanation of these concepts (including *why* we use signature-based auth instead of JWTs), see the [Concepts Guide](concepts.md). For how these flows interact with the database and infrastructure, see the [Architecture Guide](architecture.md).
 
-All signatures in Nijhum use the **VXEdDSA** scheme, which produces both a cryptographic signature and a Verifiable Random Function (VRF) output.
+All signatures in DeezChatz use the **VXEdDSA** scheme, which produces both a cryptographic signature and a Verifiable Random Function (VRF) output.
 
 ---
 

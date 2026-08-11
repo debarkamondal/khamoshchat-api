@@ -1,5 +1,5 @@
 [package]
-name = "nijhum-api"
+name = "deezchatz-api"
 version = "0.1.0"
 edition = "2021"
 
@@ -24,7 +24,7 @@ redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 
 # Crypto / Signal
 base64 = "0.22"
-libsignal-dezire = { git = "https://github.com/nijhum-in/libsignal-dezire" }
+libsignal-dezire = { git = "https://github.com/deez-in/libsignal-dezire" }
 
 # HTTP client (Google OAuth token exchange)
 reqwest = { version = "0.12", features = ["json"] }

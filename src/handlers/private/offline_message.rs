@@ -224,10 +224,10 @@ pub async fn handle_offline_message(
     if let WebhookPayload::OfflineMessage { topic, payload: msg_payload, .. } = payload {
         tracing::info!("Received offline message for topic: {}", topic);
 
-        // Topic format: /nijhum/{recipientId}/{recipientDeviceId}/{senderId}/{senderDeviceId}
-        // Split yields: ["", "nijhum", recipientId, recipientDeviceId, senderId, senderDeviceId]
+        // Topic format: /deezchatz/{recipientId}/{recipientDeviceId}/{senderId}/{senderDeviceId}
+        // Split yields: ["", "deezchatz", recipientId, recipientDeviceId, senderId, senderDeviceId]
         let parts: Vec<&str> = topic.split('/').collect();
-        if parts.len() == 6 && parts[1] == "nijhum" {
+        if parts.len() == 6 && parts[1] == "deezchatz" {
             let recipient_id = parts[2];
             let recipient_device_id = parts[3];
             let sender_id = parts[4];

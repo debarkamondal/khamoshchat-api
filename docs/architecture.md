@@ -1,6 +1,6 @@
 # Architecture Guide
 
-This document covers the **system architecture** of the Nijhum API — the database design, infrastructure layout, MQTT messaging layer, and how the components connect.
+This document covers the **system architecture** of the DeezChatz API — the database design, infrastructure layout, MQTT messaging layer, and how the components connect.
 
 For the security model and conceptual overview, see [Concepts](concepts.md).
 For the detailed cryptographic verification flows, see [Cryptographic Flows](cryptographic_flows.md).
@@ -9,7 +9,7 @@ For the detailed cryptographic verification flows, see [Cryptographic Flows](cry
 
 ## System Overview
 
-The Nijhum API runs two HTTP servers concurrently on separate ports:
+The DeezChatz API runs two HTTP servers concurrently on separate ports:
 
 | Port | Name | Purpose | Authentication |
 |------|------|---------|----------------|
@@ -21,7 +21,7 @@ The Nijhum API runs two HTTP servers concurrently on separate ports:
 ```mermaid
 graph LR
     subgraph "Client"
-        MOBILE["Nijhum Mobile"]
+        MOBILE["DeezChatz Mobile"]
     end
 
     subgraph "Public Network"
@@ -94,7 +94,7 @@ The RMQTT broker is configured via files in `devenv/rmqtt/`:
 |----------|----------|---------|-------------|
 | `AWS_REGION` | ✅ | — | AWS region for DynamoDB (e.g., `ap-south-1`) |
 | `REDIS_URL` | ✅ | — | Redis connection URL (e.g., `redis://localhost:6379`) |
-| `PRIMARY_TABLE` | ✅ | — | DynamoDB table name (e.g., `nijhum-identity`) |
+| `PRIMARY_TABLE` | ✅ | — | DynamoDB table name (e.g., `deezchatz-identity`) |
 | `GSI_LOOKUP_INDEX` | ❌ | `lookup-index` | Name of the DynamoDB GSI for email/phone lookups |
 | `GOOGLE_CLIENT_ID` | ✅ | — | Google OAuth Web Client ID (for verifying `idToken` JWTs) |
 | `GOOGLE_CLIENT_SECRET` | ✅ | — | Google OAuth client secret |
@@ -108,7 +108,7 @@ The RMQTT broker is configured via files in `devenv/rmqtt/`:
 
 All entities are stored in a single DynamoDB table using Partition Key (`pk`) and Sort Key (`sk`) to model relationships.
 
-### Primary Table (`nijhum-identity`)
+### Primary Table (`deezchatz-identity`)
 
 | Entity | `pk` | `sk` | Key Fields |
 |--------|------|------|------------|
@@ -140,7 +140,7 @@ All real-time messaging is handled by the RMQTT broker. The API server never see
 ### Topic Schema
 
 ```
-/nijhum/{recipient_id}/{recipient_device_id}/{sender_id}/{sender_device_id}
+/deezchatz/{recipient_id}/{recipient_device_id}/{sender_id}/{sender_device_id}
 ```
 
 All four IDs are embedded in the topic, making routing self-describing. No server-side lookup is needed to determine delivery intent.
@@ -149,8 +149,8 @@ All four IDs are embedded in the topic, making routing self-describing. No serve
 
 | Pattern | Purpose |
 |---------|---------|
-| `/nijhum/{recipient_id}/#` | Receive messages across all devices (multi-device sync) |
-| `/nijhum/{recipient_id}/{recipient_device_id}/#` | Receive messages for a specific device only |
+| `/deezchatz/{recipient_id}/#` | Receive messages across all devices (multi-device sync) |
+| `/deezchatz/{recipient_id}/{recipient_device_id}/#` | Receive messages for a specific device only |
 
 ### Offline Delivery Flow
 
@@ -160,7 +160,7 @@ When a message arrives for an offline subscriber:
 sequenceDiagram
     participant A as Sender
     participant M as RMQTT Broker
-    participant S as Nijhum API (port 3001)
+    participant S as DeezChatz API (port 3001)
     participant D as DynamoDB
     participant F as Firebase (FCM)
     participant B as Recipient

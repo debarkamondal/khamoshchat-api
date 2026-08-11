@@ -1,15 +1,15 @@
-# Concepts Guide
+# Concepts Guide 💬
 
-> **Start here.** This document explains the core ideas behind Nijhum before you dive into the technical details. It covers the security model, identity system, and how registration and messaging work end-to-end.
+> **Start here.** This document explains the core ideas behind DeezChatz before you dive into the technical details. It covers the security model, identity system, and how registration and messaging work end-to-end.
 
 For the detailed sequence diagrams and verification flowcharts, see [Cryptographic Flows](cryptographic_flows.md).
 For the database schema and infrastructure layout, see [Architecture](architecture.md).
 
 ---
 
-## The Nijhum Philosophy: Zero-Trust
+## The DeezChatz Philosophy: Zero-Trust
 
-Nijhum operates on a simple principle: **the server is a mailbox, not a reader.**
+DeezChatz operates on a simple principle: **the server is a mailbox, not a reader.** Got privacy? **DeezChatz**. 🔒
 
 The server stores and forwards encrypted messages, but it cannot:
 - Read message content (it's encrypted client-side before it ever touches the network).
@@ -25,7 +25,7 @@ If the server were fully compromised, an attacker would see:
 
 ## Identity Model
 
-Nijhum has three types of entities:
+DeezChatz has three types of entities:
 
 ### Individuals
 
@@ -141,7 +141,7 @@ After the initial X3DH, every subsequent message:
 
 When Bob is offline:
 1. The RMQTT broker stores the message.
-2. RMQTT fires an `offline_message` webhook to the Nijhum API's **Private API** (port 3001).
+2. RMQTT fires an `offline_message` webhook to the DeezChatz API's **Private API** (port 3001).
 3. The API parses the recipient ID from the MQTT topic, looks up Bob's FCM token in DynamoDB, and sends a **data-only push notification** (no message content is included).
 4. Bob's device wakes up, reconnects via MQTT, and retrieves the stored message from the broker.
 
@@ -149,9 +149,9 @@ When Bob is offline:
 
 ## Authentication: Why Not JWTs?
 
-Nijhum uses **stateless signature-based authentication** instead of JWTs. Here's why:
+DeezChatz uses **stateless signature-based authentication** instead of JWTs. Here's why:
 
-| | Signature Auth (Nijhum) | JWT Auth (traditional) |
+| | Signature Auth (DeezChatz) | JWT Auth (traditional) |
 |---|---|---|
 | **Who issues the credential?** | The client signs with its own key | The server issues a token |
 | **Server state needed?** | None — each request is independently verifiable | Token blacklists, refresh token rotation |

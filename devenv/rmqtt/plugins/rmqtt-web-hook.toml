@@ -15,4 +15,4 @@ retry_multiplier = 2.5
 ## Hook rules config
 rule.client_connected = [{ action = "client_connected" }]
 rule.client_disconnected = [{ action = "client_disconnected" }]
-rule.offline_message = [{ action = "offline_message", topic_filter = "/nijhum/#" }]
+rule.offline_message = [{ action = "offline_message", topic_filter = "/deezchatz/#" }]
