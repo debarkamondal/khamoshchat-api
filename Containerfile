@@ -26,8 +26,8 @@ RUN touch src/main.rs && cargo build --release
 FROM debian:bookworm-slim
 
 # OCI metadata
-LABEL org.opencontainers.image.source="https://github.com/debarkamondal/khamoshchat-api"
-LABEL org.opencontainers.image.description="KhamoshChat API server"
+LABEL org.opencontainers.image.source="https://github.com/deez-in/deezchatz-api"
+LABEL org.opencontainers.image.description="DeezChatz API server"
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -41,7 +41,7 @@ RUN groupadd --gid 1000 rocky && useradd --uid 1000 --gid 1000 --create-home roc
 WORKDIR /app
 
 # Copy the binary from the builder stage
-COPY --from=builder /app/target/release/khamoshchat-api /app/khamoshchat-api
+COPY --from=builder /app/target/release/deezchatz-api /app/deezchatz-api
 
 RUN chown -R rocky:rocky /app
 USER rocky
@@ -51,4 +51,4 @@ EXPOSE 3000
 EXPOSE 3001
 
 # Run the application
-CMD ["/app/khamoshchat-api"]
+CMD ["/app/deezchatz-api"]

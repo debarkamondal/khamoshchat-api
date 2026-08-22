@@ -1,12 +1,16 @@
-# Cryptographic Flows
+# Cryptographic Operations & Flows
 
-This document details the cryptographic operations and verification flows used by KhamoshChat. All signatures use the **VXEdDSA** scheme, which produces both a cryptographic signature and a Verifiable Random Function (VRF) output.
+This document details the exact cryptographic operations and verification flows used by the DeezChatz API. It serves as a technical reference for how the server handles keys, verifies signatures, and facilitates key exchange.
+
+For a narrative explanation of these concepts (including *why* we use signature-based auth instead of JWTs), see the [Concepts Guide](concepts.md). For how these flows interact with the database and infrastructure, see the [Architecture Guide](architecture.md).
+
+All signatures in DeezChatz use the **VXEdDSA** scheme, which produces both a cryptographic signature and a Verifiable Random Function (VRF) output.
 
 ---
 
 ## 1. Key Hierarchy
 
-Each user's cryptographic identity consists of:
+Before understanding the flows, it's important to know the keys involved. Each user's cryptographic identity consists of a chain of keys, rooted in a long-term Identity Key.
 
 | Key | Type | Purpose |
 | :--- | :--- | :--- |
@@ -55,7 +59,7 @@ Every VXEdDSA signature operation over a message `m` with Identity Key `iKey` pr
 
 ## 2. Registration: Dual-Key Verification
 
-During device registration (`POST /register/device`), the server verifies **two** VXEdDSA signatures to ensure the client provably holds the Identity Key.
+During device registration (`POST /register/device`), the client uploads its newly generated keys. The server verifies **two** VXEdDSA signatures to ensure the client provably holds the private Identity Key. This happens after Phase 1 (OAuth), which is described in the [Concepts Guide](concepts.md#registration-flow).
 
 ### Sequence
 
@@ -89,6 +93,8 @@ sequenceDiagram
 ```
 
 ### Verification Flowchart
+
+If either signature verification fails, the entire registration request is rejected.
 
 ```mermaid
 flowchart TD
@@ -125,7 +131,7 @@ flowchart TD
 
 ## 3. Stateless Signature Authentication
 
-Authenticated endpoints on the **Public API (port 3000)** — those that retrieve key discovery data or operate on existing client data (e.g., pre-key bundle retrieval, FCM token updates) — are protected by VXEdDSA signature authentication. No sessions or tokens are used.
+Authenticated endpoints on the **Public API** (e.g., retrieving a pre-key bundle or updating an FCM token) use VXEdDSA signature authentication. For a conceptual overview of why we don't use JWTs, see [Authentication: Why Not JWTs?](concepts.md#authentication-why-not-jwts).
 
 ### Sequence
 
@@ -210,7 +216,7 @@ flowchart TD
 
 ## 4. X3DH Session Establishment
 
-The X3DH handshake is performed entirely client-side. The server's role is limited to storing and serving Pre-Key Bundles.
+When one user wants to message another for the first time, they must perform an X3DH handshake. The server simply serves the recipient's pre-key bundle; the actual key exchange happens entirely client-side.
 
 ### Sequence
 
@@ -262,20 +268,18 @@ sequenceDiagram
 | `signature` | Profile item (VXEdDSA signature of `signedPreKey`) |
 | `opk` | One OPK consumed from the `opks` list (removed after retrieval) |
 
-The initiating client uses these to perform the X3DH key agreement locally. The server never participates in the key exchange computation.
-
 ---
 
 ## 5. VXEdDSA Verification Functions
 
-The server exposes two internal verification functions in `src/crypto.rs`:
+The server exposes two internal verification functions in `src/crypto.rs` to support these flows:
 
 ### `verify_signed_signature(iKey, target_key, signature, vrf, field_name)`
 
 **Used during**: Registration (called twice — once for pre-key, once for device key)
 
 1. Decodes all Base64 inputs and validates lengths.
-2. Calls `vxeddsa_verify(iKey, target_key, signature)`.
+2. Calls `vxeddsa_verify(iKey, target_key, signature)` from the `libsignal-dezire` crate.
 3. If verification succeeds, asserts the returned VRF matches the expected `vrf`.
 4. Returns `Err(Unauthorized)` on signature failure or VRF mismatch.
 
@@ -283,38 +287,6 @@ The server exposes two internal verification functions in `src/crypto.rs`:
 
 **Used during**: Stateless authentication (per-request)
 
-1. Calls `vxeddsa_verify(public_key, message, signature)`.
+1. Calls `vxeddsa_verify(public_key, message, signature)` from the `libsignal-dezire` crate.
 2. Returns the VRF output on success (caller checks the match against `X-Vrf`).
 3. Returns `Err(Unauthorized)` on signature failure.
-
----
-
-## 6. Message Encryption & Delivery
-
-Messages exchanged over MQTT are **opaque ciphertext**. The server never inspects, decrypts, or validates message payloads.
-
-### Delivery Flow
-
-```mermaid
-sequenceDiagram
-    participant A as Sender
-    participant M as RMQTT Broker
-    participant S as Server (port 3001)
-    participant F as Firebase (FCM)
-    participant B as Recipient
-
-    A->>M: Publish encrypted message to<br/>/khamoshchat/{recipient_id}/<br/>{recipient_device_id}/{sender_id}/{sender_device_id}
-
-    alt Recipient is online
-        M-->>B: Deliver message in real-time
-    else Recipient is offline
-        M->>M: Store message (Redis-backed)
-        M->>S: POST /offline_message webhook<br/>{topic, from_clientid, ts}
-        S->>S: Parse recipient_id and<br/>device_id from topic
-        S->>S: Lookup fcm_token in DynamoDB
-        S->>F: Send data-only push<br/>(no ciphertext included)
-        F-->>B: Wake notification
-        B->>M: Reconnect via MQTT
-        M-->>B: Deliver stored message
-    end
-```
