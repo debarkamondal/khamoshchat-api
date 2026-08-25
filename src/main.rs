@@ -75,11 +75,11 @@ async fn main() {
     // Listeners
     let public_listener = tokio::net::TcpListener::bind(&public_addr)
         .await
-        .expect(&format!("Failed to bind to public port {}", public_port));
+        .unwrap_or_else(|_| panic!("Failed to bind to public port {}", public_port));
 
     let private_listener = tokio::net::TcpListener::bind(&private_addr)
         .await
-        .expect(&format!("Failed to bind to private port {}", private_port));
+        .unwrap_or_else(|_| panic!("Failed to bind to private port {}", private_port));
 
     tracing::info!("Starting DeezChatz public API on {}", public_addr);
     tracing::info!("Starting DeezChatz private API on {}", private_addr);

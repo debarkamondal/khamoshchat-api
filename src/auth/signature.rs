@@ -1,7 +1,4 @@
-use axum::{
-    extract::FromRequestParts,
-    http::request::Parts,
-};
+use axum::{extract::FromRequestParts, http::request::Parts};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
@@ -19,7 +16,10 @@ pub struct AuthenticatedUser {
 impl FromRequestParts<AppState> for AuthenticatedUser {
     type Rejection = AppError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         let user_id = parts
             .headers
             .get("X-User-Id")
@@ -45,67 +45,77 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
             .ok_or_else(|| AppError::Unauthorized("Missing X-Vrf header".to_string()))?;
 
         // 1. Timestamp validation (prevent replay attacks)
-        let timestamp: u64 = timestamp_str.parse().map_err(|_| {
-            AppError::Unauthorized("Invalid timestamp format".to_string())
-        })?;
+        let timestamp: u64 = timestamp_str
+            .parse()
+            .map_err(|_| AppError::Unauthorized("Invalid timestamp format".to_string()))?;
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as u64;
 
         // Allow +/- 10 seconds drift
-        let drift = if now > timestamp {
-            now - timestamp
-        } else {
-            timestamp - now
-        };
+        let drift = now.abs_diff(timestamp);
 
         if drift > 10_000 {
-            return Err(AppError::Unauthorized("Timestamp expired or too far in the future".to_string()));
+            return Err(AppError::Unauthorized(
+                "Timestamp expired or too far in the future".to_string(),
+            ));
         }
 
         // 2. Fetch User Profile
         let pk = user_pk(user_id);
         let sk = "PROFILE";
         let item_opt = get_item(state, &pk, sk).await?;
-        
-        let item = item_opt.ok_or_else(|| {
-            AppError::Unauthorized("User not found".to_string())
-        })?;
+
+        let item = item_opt.ok_or_else(|| AppError::Unauthorized("User not found".to_string()))?;
 
         let profile = Profile::from(item);
 
-        let signed_prekey_b64 = profile.signed_prekey.ok_or_else(|| {
-            AppError::Unauthorized("Missing signed_prekey for user".to_string())
-        })?;
-
+        let signed_prekey_b64 = profile
+            .signed_prekey
+            .ok_or_else(|| AppError::Unauthorized("Missing signed_prekey for user".to_string()))?;
 
         // 3. Verify Signature
         // The signed payload is: userId + timestamp
         let payload = format!("{}{}", user_id, timestamp_str);
-        
-        let signed_prekey_bytes = crate::crypto::decode_b64_key(&signed_prekey_b64, crate::crypto::PUBLIC_KEY_LENGTH, "signedPreKey")?;
-        let signature_bytes = crate::crypto::decode_b64_key(signature_b64, crate::crypto::SIGNATURE_LENGTH, "signature")?;
-        let expected_vrf_bytes = crate::crypto::decode_b64_key(vrf_b64, crate::crypto::VRF_LENGTH, "vrf")?;
-        
+
+        let signed_prekey_bytes = crate::crypto::decode_b64_key(
+            &signed_prekey_b64,
+            crate::crypto::PUBLIC_KEY_LENGTH,
+            "signedPreKey",
+        )?;
+        let signature_bytes = crate::crypto::decode_b64_key(
+            signature_b64,
+            crate::crypto::SIGNATURE_LENGTH,
+            "signature",
+        )?;
+        let expected_vrf_bytes =
+            crate::crypto::decode_b64_key(vrf_b64, crate::crypto::VRF_LENGTH, "vrf")?;
+
         let public_key: [u8; 33] = signed_prekey_bytes.try_into().unwrap();
         let sig: [u8; 96] = signature_bytes.try_into().unwrap();
 
         match verify_signature(&public_key, payload.as_bytes(), &sig) {
             Ok(output_vrf) => {
                 if output_vrf != expected_vrf_bytes.as_slice() {
-                   return Err(AppError::Unauthorized("VRF mismatch".to_string()));
+                    return Err(AppError::Unauthorized("VRF mismatch".to_string()));
                 }
-                
-                // Redis replay protection (Only for FCM update endpoint, 10 seconds TTL)
+
+                // Redis replay protection — TTL varies by HTTP method:
+                // - POST: 10 seconds (full window; state-mutating, must not replay)
+                // - GET:  3 seconds  (short window; read-only, allows quick client retries)
                 // Uses atomic SET NX to eliminate the check-then-set race condition.
-                if parts.uri.path() == "/register/device/fcm" {
-                    let replay_key = format!("replay:sig:{}", signature_b64);
-                    let was_set = crate::db::temp::set_temp_json_nx(state, &replay_key, "1", 10).await?;
-                    if !was_set {
-                        return Err(AppError::Unauthorized("Replay attack detected".to_string()));
-                    }
+                let replay_ttl = if parts.method == axum::http::Method::POST {
+                    10
+                } else {
+                    3
+                };
+                let replay_key = format!("replay:sig:{}", signature_b64);
+                let was_set =
+                    crate::db::temp::set_temp_json_nx(state, &replay_key, "1", replay_ttl).await?;
+                if !was_set {
+                    return Err(AppError::Unauthorized("Replay attack detected".to_string()));
                 }
 
                 Ok(AuthenticatedUser {

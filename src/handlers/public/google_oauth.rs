@@ -4,7 +4,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::{
-    db::{keys::pending_reg_key, primary::query_gsi_lookup, temp::set_temp_json},
+    db::{
+        keys::{email_lookup_pk, lookup_sk, pending_reg_key},
+        primary::get_item,
+        temp::set_temp_json,
+    },
     error::AppError,
     models::temp_registration::TempRegistration,
     state::AppState,
@@ -36,7 +40,7 @@ pub async fn verify_id_token(
         let cache = state.google_jwks.read().await;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
         if cache.1.is_some() && now - cache.0 < 3600 {
             jwks = cache.1.clone();
@@ -50,7 +54,7 @@ pub async fn verify_id_token(
         let mut cache = state.google_jwks.write().await;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
 
         if cache.1.is_some() && now - cache.0 < 3600 {
@@ -60,7 +64,8 @@ pub async fn verify_id_token(
         } else {
             // Cache is still stale — we are the one request that fetches it.
             // Use the shared HTTP client to reuse the existing TLS connection pool.
-            let resp = state.http_client
+            let resp = state
+                .http_client
                 .get("https://www.googleapis.com/oauth2/v3/certs")
                 .send()
                 .await
@@ -68,13 +73,10 @@ pub async fn verify_id_token(
                     tracing::error!("Failed to fetch JWKS: {}", e);
                     AppError::BadGateway(format!("Failed to fetch JWKS: {}", e))
                 })?;
-            let fetched_jwks: jsonwebtoken::jwk::JwkSet = resp
-                .json()
-                .await
-                .map_err(|e| {
-                    tracing::error!("Failed to parse JWKS: {}", e);
-                    AppError::BadGateway(format!("Failed to parse JWKS: {}", e))
-                })?;
+            let fetched_jwks: jsonwebtoken::jwk::JwkSet = resp.json().await.map_err(|e| {
+                tracing::error!("Failed to parse JWKS: {}", e);
+                AppError::BadGateway(format!("Failed to parse JWKS: {}", e))
+            })?;
             jwks = Some(fetched_jwks.clone());
             cache.0 = now;
             cache.1 = Some(fetched_jwks);
@@ -82,39 +84,34 @@ pub async fn verify_id_token(
     }
 
     let jwks = jwks.unwrap();
-    let header = jsonwebtoken::decode_header(&req.id_token)
-        .map_err(|e| {
-            tracing::error!("Invalid ID token header: {}", e);
-            AppError::BadRequest(format!("Invalid ID token header: {}", e))
-        })?;
-    let kid = header
-        .kid
-        .ok_or_else(|| {
-            tracing::error!("Missing kid in ID token");
-            AppError::BadRequest("Missing kid in ID token".to_string())
-        })?;
+    let header = jsonwebtoken::decode_header(&req.id_token).map_err(|e| {
+        tracing::error!("Invalid ID token header: {}", e);
+        AppError::BadRequest(format!("Invalid ID token header: {}", e))
+    })?;
+    let kid = header.kid.ok_or_else(|| {
+        tracing::error!("Missing kid in ID token");
+        AppError::BadRequest("Missing kid in ID token".to_string())
+    })?;
 
-    let jwk = jwks
-        .find(&kid)
-        .ok_or_else(|| {
-            tracing::error!("Unknown kid in ID token");
-            AppError::BadRequest("Unknown kid in ID token".to_string())
-        })?;
-    let decoding_key = jsonwebtoken::DecodingKey::from_jwk(jwk)
-        .map_err(|e| {
-            tracing::error!("Invalid JWK: {}", e);
-            AppError::BadRequest(format!("Invalid JWK: {}", e))
-        })?;
+    let jwk = jwks.find(&kid).ok_or_else(|| {
+        tracing::error!("Unknown kid in ID token");
+        AppError::BadRequest("Unknown kid in ID token".to_string())
+    })?;
+    let decoding_key = jsonwebtoken::DecodingKey::from_jwk(jwk).map_err(|e| {
+        tracing::error!("Invalid JWK: {}", e);
+        AppError::BadRequest(format!("Invalid JWK: {}", e))
+    })?;
 
     let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
     validation.set_audience(&[&state.google_client_id]);
     validation.set_issuer(&["https://accounts.google.com", "accounts.google.com"]);
 
-    let token_data = jsonwebtoken::decode::<GoogleIdTokenClaims>(&req.id_token, &decoding_key, &validation)
-        .map_err(|e| {
-            tracing::error!("Invalid ID token: {}", e);
-            AppError::Unauthorized(format!("Invalid ID token: {}", e))
-        })?;
+    let token_data =
+        jsonwebtoken::decode::<GoogleIdTokenClaims>(&req.id_token, &decoding_key, &validation)
+            .map_err(|e| {
+                tracing::error!("Invalid ID token: {}", e);
+                AppError::Unauthorized(format!("Invalid ID token: {}", e))
+            })?;
 
     let claims = token_data.claims;
     if !claims.email_verified {
@@ -122,12 +119,12 @@ pub async fn verify_id_token(
         return Err(AppError::Unauthorized("Google email not verified".into()));
     }
 
-    // ── 2. Reuse existing userId if profile exists for claims.email, otherwise generate new userId ──
-    let existing_profile = query_gsi_lookup(&state, &claims.email).await?;
-    let user_id = if let Some(ref item) = existing_profile {
-        item.get("pk")
+    // ── 2. Reuse existing userId if email pointer exists for claims.email, otherwise generate new userId ──
+    let email_pk = email_lookup_pk(&claims.email);
+    let existing_pointer = get_item(&state, &email_pk, &lookup_sk()).await?;
+    let user_id = if let Some(ref item) = existing_pointer {
+        item.get("userId")
             .and_then(|v| v.as_s().ok())
-            .and_then(|pk| pk.strip_prefix("USER#"))
             .map(|id| id.to_string())
             .unwrap_or_else(|| Uuid::new_v4().to_string())
     } else {
@@ -136,7 +133,7 @@ pub async fn verify_id_token(
 
     let now_millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis() as u64;
 
     let pending_data = TempRegistration {

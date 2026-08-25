@@ -143,11 +143,11 @@ docker run -d \
 ### Production Considerations (CRITICAL)
 
 - **Network Isolation**: Port 3001 (Private API) **MUST NOT** be exposed to the internet. It has no authentication. It should only be reachable by the RMQTT broker within your VPC or docker network. Use firewall rules or AWS Security Groups to restrict access.
-- **AWS IAM Permissions**: The production task execution role requires the following DynamoDB permissions on the primary table (and its GSI):
+- **AWS IAM Permissions**: The production task execution role requires the following DynamoDB permissions on the primary table:
   - `dynamodb:PutItem`
   - `dynamodb:GetItem`
   - `dynamodb:UpdateItem`
-  - `dynamodb:Query`
+  - `dynamodb:DeleteItem`
   - `dynamodb:TransactWriteItems`
 - **Secrets Management**: Do not bake `.env` files into production images. Use a secret manager (like AWS Secrets Manager or ECS environment variable injection) for `GOOGLE_CLIENT_SECRET` and `REDIS_URL`.
 - **RMQTT Configuration**: The API relies on RMQTT webhooks to trigger offline push notifications. Ensure the RMQTT production configuration mirrors `devenv/rmqtt/plugins/rmqtt-web-hook.toml` and points to the API's port 3001.

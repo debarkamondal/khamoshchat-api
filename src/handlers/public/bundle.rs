@@ -7,8 +7,8 @@ use serde::Serialize;
 use crate::{
     auth::signature::AuthenticatedUser,
     db::{
-        keys::user_pk,
-        primary::{get_item, pop_opk, query_gsi_lookup},
+        keys::{profile_sk, user_pk},
+        primary::{get_item, pop_opk, resolve_user_by_identifier},
     },
     error::AppError,
     models::profile::Profile,
@@ -56,17 +56,17 @@ pub async fn get_bundle(
 
     // 1. Dual-path lookup strategy
     let is_email = identifier.contains('@');
-    let is_phone = identifier.starts_with('+') || identifier.chars().all(|c| c.is_digit(10));
+    let is_phone = identifier.starts_with('+') || identifier.chars().all(|c| c.is_ascii_digit());
 
     let mut retries = 5;
     loop {
         let profile_item_opt = if is_email || is_phone {
-            // Query GSI
-            query_gsi_lookup(&state, &identifier).await?
+            // Pointer lookup -> profile
+            resolve_user_by_identifier(&state, &identifier).await?
         } else {
             // Assume userId -> query base table directly
             let pk = user_pk(&identifier);
-            get_item(&state, &pk, "PROFILE").await?
+            get_item(&state, &pk, &profile_sk()).await?
         };
 
         let item = profile_item_opt
@@ -148,7 +148,7 @@ pub async fn get_sync_bundle(
     }
 
     let pk = user_pk(&user_id);
-    let item = get_item(&state, &pk, "PROFILE")
+    let item = get_item(&state, &pk, &profile_sk())
         .await?
         .ok_or_else(|| AppError::NotFound("Requested user not found".to_string()))?;
 

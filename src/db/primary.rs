@@ -1,5 +1,5 @@
 use crate::{error::AppError, state::AppState};
-use aws_sdk_dynamodb::types::{AttributeValue, Put, TransactWriteItem};
+use aws_sdk_dynamodb::types::{AttributeValue, TransactWriteItem};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -28,55 +28,56 @@ pub async fn get_item(
     Ok(res.item)
 }
 
-pub async fn query_gsi_lookup(
+pub async fn resolve_user_by_identifier(
     state: &AppState,
-    lookup_value: &str,
+    identifier: &str,
 ) -> Result<Option<HashMap<String, AttributeValue>>, AppError> {
-    let res = state
-        .dynamo
-        .query()
-        .table_name(&state.primary_table)
-        .index_name(&state.gsi_lookup_index)
-        .key_condition_expression("#lookup = :val")
-        .expression_attribute_names("#lookup", "lookup")
-        .expression_attribute_values(":val", AttributeValue::S(lookup_value.to_string()))
-        .limit(1)
-        .send()
-        .await
-        .map_err(|e| {
-            tracing::error!(
-                "DynamoDB query GSI error: {}",
-                aws_sdk_dynamodb::error::DisplayErrorContext(&e)
-            );
-            AppError::Internal("Database error".into())
-        })?;
+    let (pk, sk) = if identifier.contains('@') {
+        (
+            crate::db::keys::email_lookup_pk(identifier),
+            crate::db::keys::lookup_sk(),
+        )
+    } else {
+        (
+            crate::db::keys::phone_lookup_pk(identifier),
+            crate::db::keys::lookup_sk(),
+        )
+    };
 
-    Ok(res.items.unwrap_or_default().into_iter().next())
+    let pointer = get_item(state, &pk, &sk).await?;
+    let pointer_item = match pointer {
+        Some(item) => item,
+        None => return Ok(None),
+    };
+
+    let user_id = match pointer_item.get("userId").and_then(|v| v.as_s().ok()) {
+        Some(uid) => uid,
+        None => return Ok(None),
+    };
+
+    let user_pk = crate::db::keys::user_pk(user_id);
+    let profile_sk = crate::db::keys::profile_sk();
+    get_item(state, &user_pk, &profile_sk).await
 }
 
 pub async fn transact_write_items(
     state: &AppState,
-    items: Vec<HashMap<String, AttributeValue>>,
+    items: Vec<TransactWriteItem>,
 ) -> Result<(), AppError> {
-    let mut transact_items = Vec::new();
-
-    for item in items {
-        let put = Put::builder()
-            .table_name(&state.primary_table)
-            .set_item(Some(item))
-            .build()
-            .unwrap();
-
-        transact_items.push(TransactWriteItem::builder().put(put).build());
-    }
-
     state
         .dynamo
         .transact_write_items()
-        .set_transact_items(Some(transact_items))
+        .set_transact_items(Some(items))
         .send()
         .await
         .map_err(|e| {
+            if let aws_sdk_dynamodb::error::SdkError::ServiceError(ref se) = e {
+                if se.err().is_transaction_canceled_exception() {
+                    return AppError::Conflict(
+                        "Conflict: An item condition check failed or already exists".to_string(),
+                    );
+                }
+            }
             tracing::error!(
                 "DynamoDB transact_write_items error: {}",
                 aws_sdk_dynamodb::error::DisplayErrorContext(&e)
@@ -96,9 +97,22 @@ pub async fn update_item_fcm(
     sk: &str,
     fcm_token: &str,
 ) -> Result<(), AppError> {
+    // Secondary update: sync the denormalized fcmToken on the PROFILE item.
+    // This is best-effort — a failure is logged but does not fail the request,
+    // since the DEVICE# item is the authoritative source for push delivery.
+    let profile_future = state
+        .dynamo
+        .update_item()
+        .table_name(&state.primary_table)
+        .key("pk", AttributeValue::S(pk.to_string()))
+        .key("sk", AttributeValue::S("PROFILE".to_string()))
+        .update_expression("SET fcmToken = :token")
+        .expression_attribute_values(":token", AttributeValue::S(fcm_token.to_string()))
+        .send();
+
     // Primary update: write to the DEVICE# item (authoritative source for notifications).
     // The condition ensures the device exists before updating.
-    state
+    let device_future = state
         .dynamo
         .update_item()
         .table_name(&state.primary_table)
@@ -107,34 +121,22 @@ pub async fn update_item_fcm(
         .update_expression("SET fcmToken = :token")
         .expression_attribute_values(":token", AttributeValue::S(fcm_token.to_string()))
         .condition_expression("attribute_exists(signedDeviceKey)")
-        .send()
-        .await
-        .map_err(|e| {
-            if let aws_sdk_dynamodb::error::SdkError::ServiceError(ref se) = e {
-                if se.err().is_conditional_check_failed_exception() {
-                    return AppError::NotFound("Device not found or not registered".to_string());
-                }
-            }
-            tracing::error!(
-                "Failed to update fcmToken in DynamoDB: {}",
-                aws_sdk_dynamodb::error::DisplayErrorContext(&e)
-            );
-            AppError::Internal("Database error".into())
-        })?;
+        .send();
 
-    // Secondary update: sync the denormalized fcmToken on the PROFILE item.
-    // This is best-effort — a failure is logged but does not fail the request,
-    // since the DEVICE# item is the authoritative source for push delivery.
-    let profile_result = state
-        .dynamo
-        .update_item()
-        .table_name(&state.primary_table)
-        .key("pk", AttributeValue::S(pk.to_string()))
-        .key("sk", AttributeValue::S("PROFILE".to_string()))
-        .update_expression("SET fcmToken = :token")
-        .expression_attribute_values(":token", AttributeValue::S(fcm_token.to_string()))
-        .send()
-        .await;
+    let (device_result, profile_result) = tokio::join!(device_future, profile_future);
+
+    device_result.map_err(|e| {
+        if let aws_sdk_dynamodb::error::SdkError::ServiceError(ref se) = e {
+            if se.err().is_conditional_check_failed_exception() {
+                return AppError::NotFound("Device not found or not registered".to_string());
+            }
+        }
+        tracing::error!(
+            "Failed to update fcmToken in DynamoDB: {}",
+            aws_sdk_dynamodb::error::DisplayErrorContext(&e)
+        );
+        AppError::Internal("Database error".into())
+    })?;
 
     if let Err(ref e) = profile_result {
         tracing::warn!(
@@ -145,7 +147,6 @@ pub async fn update_item_fcm(
 
     Ok(())
 }
-
 
 pub async fn pop_opk(
     state: &AppState,
@@ -197,11 +198,11 @@ pub async fn put_offline_message(
 ) -> Result<(), AppError> {
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis() as u64;
     let ttl_secs = (SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs())
         + (30 * 24 * 60 * 60); // 30 days
 
@@ -211,11 +212,23 @@ pub async fn put_offline_message(
     let mut item = HashMap::new();
     item.insert("pk".to_string(), AttributeValue::S(pk));
     item.insert("sk".to_string(), AttributeValue::S(sk));
-    item.insert("senderId".to_string(), AttributeValue::S(sender_id.to_string()));
-    item.insert("senderDeviceId".to_string(), AttributeValue::S(sender_device_id.to_string()));
+    item.insert(
+        "senderId".to_string(),
+        AttributeValue::S(sender_id.to_string()),
+    );
+    item.insert(
+        "senderDeviceId".to_string(),
+        AttributeValue::S(sender_device_id.to_string()),
+    );
     item.insert("topic".to_string(), AttributeValue::S(topic.to_string()));
-    item.insert("payload".to_string(), AttributeValue::S(payload.to_string()));
-    item.insert("createdAt".to_string(), AttributeValue::N(now_ms.to_string()));
+    item.insert(
+        "payload".to_string(),
+        AttributeValue::S(payload.to_string()),
+    );
+    item.insert(
+        "createdAt".to_string(),
+        AttributeValue::N(now_ms.to_string()),
+    );
     item.insert("ttl".to_string(), AttributeValue::N(ttl_secs.to_string()));
 
     state

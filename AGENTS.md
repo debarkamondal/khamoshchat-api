@@ -91,7 +91,6 @@ Map of the `src/` directory:
 | `AWS_REGION` | DynamoDB region |
 | `REDIS_URL` | Redis connection string |
 | `PRIMARY_TABLE` | DynamoDB table name |
-| `GSI_LOOKUP_INDEX` | DynamoDB GSI name (default: `lookup-index`) |
 | `GOOGLE_CLIENT_ID` | OAuth Web Client ID (verifies `aud` claim in JWTs) |
 | `GOOGLE_CLIENT_SECRET` | OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | OAuth redirect URI |

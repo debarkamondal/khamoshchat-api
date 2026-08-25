@@ -1,13 +1,17 @@
-use aws_sdk_dynamodb::types::AttributeValue;
+use aws_sdk_dynamodb::types::{AttributeValue, Delete, Put, TransactWriteItem};
 use axum::{extract::State, Json};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::{
     crypto::verify_signed_signature,
     db::{
-        keys::{device_sk, pending_reg_key, profile_sk, user_pk},
+        keys::{
+            device_sk, email_lookup_pk, lookup_sk, pending_reg_key, phone_lookup_pk, profile_sk,
+            user_pk,
+        },
         primary::transact_write_items,
         temp::{delete_temp_key, get_temp_json},
     },
@@ -33,12 +37,14 @@ pub struct RegisterDeviceRequest {
     pub fcm_token: Option<String>,
 }
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 pub async fn register_device(
     State(state): State<AppState>,
     Json(req): Json<RegisterDeviceRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    if req.phone.trim().is_empty() {
+        return Err(AppError::BadRequest("Phone number is required".to_string()));
+    }
+
     // 1. Fetch pending record from Redis
     let redis_key = pending_reg_key(&req.user_id);
     let pending_json = get_temp_json(&state, &redis_key).await?;
@@ -70,49 +76,49 @@ pub async fn register_device(
     let pk = user_pk(&req.user_id);
     let existing_profile_opt = crate::db::primary::get_item(&state, &pk, &profile_sk()).await?;
 
-    let (device_id, created_at, existing_picture) = if let Some(ref existing) = existing_profile_opt {
-        let dev_id = existing
-            .get("deviceId")
-            .and_then(|v| v.as_s().ok())
-            .cloned()
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let (device_id, created_at, existing_picture, old_phone) =
+        if let Some(ref existing) = existing_profile_opt {
+            let dev_id = existing
+                .get("deviceId")
+                .and_then(|v| v.as_s().ok())
+                .cloned()
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
 
-        let created = existing
-            .get("createdAt")
-            .and_then(|v| v.as_n().ok())
-            .and_then(|n| n.parse::<u64>().ok())
-            .unwrap_or(pending_data.created_at);
+            let created = existing
+                .get("createdAt")
+                .and_then(|v| v.as_n().ok())
+                .and_then(|n| n.parse::<u64>().ok())
+                .unwrap_or(pending_data.created_at);
 
-        let pic = existing
-            .get("picture")
-            .and_then(|v| v.as_s().ok())
-            .cloned();
+            let pic = existing.get("picture").and_then(|v| v.as_s().ok()).cloned();
 
-        (dev_id, created, pic)
-    } else {
-        (Uuid::new_v4().to_string(), pending_data.created_at, None)
-    };
+            let old_ph = existing.get("phone").and_then(|v| v.as_s().ok()).cloned();
+
+            (dev_id, created, pic, old_ph)
+        } else {
+            (
+                Uuid::new_v4().to_string(),
+                pending_data.created_at,
+                None,
+                None,
+            )
+        };
 
     let now_millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis() as u64;
 
-    // Profile Item
+    // Profile Item (zero-GSI, no lookup attribute)
     let mut profile_item = HashMap::new();
     profile_item.insert("pk".to_string(), AttributeValue::S(pk.clone()));
     profile_item.insert("sk".to_string(), AttributeValue::S(profile_sk()));
-
-    let lookup_val = if !pending_data.email.is_empty() {
-        pending_data.email.clone()
-    } else {
-        req.phone.clone()
-    };
-    profile_item.insert("lookup".to_string(), AttributeValue::S(lookup_val));
-
     profile_item.insert("name".to_string(), AttributeValue::S(pending_data.name));
-    profile_item.insert("email".to_string(), AttributeValue::S(pending_data.email));
-    profile_item.insert("phone".to_string(), AttributeValue::S(req.phone));
+    profile_item.insert(
+        "email".to_string(),
+        AttributeValue::S(pending_data.email.clone()),
+    );
+    profile_item.insert("phone".to_string(), AttributeValue::S(req.phone.clone()));
     if let Some(pic) = pending_data.picture.or(existing_picture) {
         profile_item.insert("picture".to_string(), AttributeValue::S(pic));
     }
@@ -125,11 +131,7 @@ pub async fn register_device(
     profile_item.insert("signature".to_string(), AttributeValue::S(req.pre_key_sign));
 
     if !req.opks.is_empty() {
-        let opks_attr: Vec<AttributeValue> = req
-            .opks
-            .into_iter()
-            .map(|opk| AttributeValue::S(opk))
-            .collect();
+        let opks_attr: Vec<AttributeValue> = req.opks.into_iter().map(AttributeValue::S).collect();
         profile_item.insert("opks".to_string(), AttributeValue::L(opks_attr));
     }
     profile_item.insert(
@@ -153,10 +155,7 @@ pub async fn register_device(
     // Device Item
     let mut device_item = HashMap::new();
     device_item.insert("pk".to_string(), AttributeValue::S(pk.clone()));
-    device_item.insert(
-        "sk".to_string(),
-        AttributeValue::S(device_sk(&device_id)),
-    );
+    device_item.insert("sk".to_string(), AttributeValue::S(device_sk(&device_id)));
     device_item.insert(
         "signedDeviceKey".to_string(),
         AttributeValue::S(req.signed_device_key),
@@ -173,8 +172,110 @@ pub async fn register_device(
         AttributeValue::N(now_millis.to_string()),
     );
 
+    let mut transact_items = Vec::new();
+
+    // 1. Put Profile
+    let put_profile = Put::builder()
+        .table_name(&state.primary_table)
+        .set_item(Some(profile_item))
+        .build()
+        .map_err(|e| AppError::Internal(format!("Failed to build profile put: {}", e)))?;
+    transact_items.push(TransactWriteItem::builder().put(put_profile).build());
+
+    // 2. Put Device
+    let put_device = Put::builder()
+        .table_name(&state.primary_table)
+        .set_item(Some(device_item))
+        .build()
+        .map_err(|e| AppError::Internal(format!("Failed to build device put: {}", e)))?;
+    transact_items.push(TransactWriteItem::builder().put(put_device).build());
+
+    if existing_profile_opt.is_none() {
+        // New user: write both EMAIL# and PHONE# pointer items with uniqueness conditions
+        let mut email_pointer = HashMap::new();
+        email_pointer.insert(
+            "pk".to_string(),
+            AttributeValue::S(email_lookup_pk(&pending_data.email)),
+        );
+        email_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk()));
+        email_pointer.insert("userId".to_string(), AttributeValue::S(req.user_id.clone()));
+
+        let put_email_ptr = Put::builder()
+            .table_name(&state.primary_table)
+            .set_item(Some(email_pointer))
+            .condition_expression("attribute_not_exists(pk)")
+            .build()
+            .map_err(|e| AppError::Internal(format!("Failed to build email pointer put: {}", e)))?;
+        transact_items.push(TransactWriteItem::builder().put(put_email_ptr).build());
+
+        let mut phone_pointer = HashMap::new();
+        phone_pointer.insert(
+            "pk".to_string(),
+            AttributeValue::S(phone_lookup_pk(&req.phone)),
+        );
+        phone_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk()));
+        phone_pointer.insert("userId".to_string(), AttributeValue::S(req.user_id.clone()));
+
+        let put_phone_ptr = Put::builder()
+            .table_name(&state.primary_table)
+            .set_item(Some(phone_pointer))
+            .condition_expression("attribute_not_exists(pk)")
+            .build()
+            .map_err(|e| AppError::Internal(format!("Failed to build phone pointer put: {}", e)))?;
+        transact_items.push(TransactWriteItem::builder().put(put_phone_ptr).build());
+    } else {
+        // Re-registering user:
+        // Email pointer is immutable (never modified/deleted).
+        // Only update phone pointer if phone number changed.
+        let phone_changed = match old_phone {
+            Some(ref old) => old.trim() != req.phone.trim(),
+            None => true,
+        };
+
+        if phone_changed {
+            if let Some(ref old) = old_phone {
+                if !old.trim().is_empty() {
+                    let delete_old_phone_ptr = Delete::builder()
+                        .table_name(&state.primary_table)
+                        .key("pk", AttributeValue::S(phone_lookup_pk(old)))
+                        .key("sk", AttributeValue::S(lookup_sk()))
+                        .build()
+                        .map_err(|e| {
+                            AppError::Internal(format!(
+                                "Failed to build delete phone pointer: {}",
+                                e
+                            ))
+                        })?;
+                    transact_items.push(
+                        TransactWriteItem::builder()
+                            .delete(delete_old_phone_ptr)
+                            .build(),
+                    );
+                }
+            }
+
+            let mut new_phone_pointer = HashMap::new();
+            new_phone_pointer.insert(
+                "pk".to_string(),
+                AttributeValue::S(phone_lookup_pk(&req.phone)),
+            );
+            new_phone_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk()));
+            new_phone_pointer.insert("userId".to_string(), AttributeValue::S(req.user_id.clone()));
+
+            let put_new_phone_ptr = Put::builder()
+                .table_name(&state.primary_table)
+                .set_item(Some(new_phone_pointer))
+                .condition_expression("attribute_not_exists(pk)")
+                .build()
+                .map_err(|e| {
+                    AppError::Internal(format!("Failed to build new phone pointer put: {}", e))
+                })?;
+            transact_items.push(TransactWriteItem::builder().put(put_new_phone_ptr).build());
+        }
+    }
+
     // Transact write
-    transact_write_items(&state, vec![profile_item, device_item]).await?;
+    transact_write_items(&state, transact_items).await?;
 
     // 4. Delete Redis key
     let _ = delete_temp_key(&state, &redis_key).await;

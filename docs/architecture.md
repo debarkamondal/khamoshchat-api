@@ -95,7 +95,6 @@ The RMQTT broker is configured via files in `devenv/rmqtt/`:
 | `AWS_REGION` | ✅ | — | AWS region for DynamoDB (e.g., `ap-south-1`) |
 | `REDIS_URL` | ✅ | — | Redis connection URL (e.g., `redis://localhost:6379`) |
 | `PRIMARY_TABLE` | ✅ | — | DynamoDB table name (e.g., `deezchatz-identity`) |
-| `GSI_LOOKUP_INDEX` | ❌ | `lookup-index` | Name of the DynamoDB GSI for email/phone lookups |
 | `GOOGLE_CLIENT_ID` | ✅ | — | Google OAuth Web Client ID (for verifying `idToken` JWTs) |
 | `GOOGLE_CLIENT_SECRET` | ✅ | — | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | ✅ | — | Google OAuth redirect URI |
@@ -106,23 +105,25 @@ The RMQTT broker is configured via files in `devenv/rmqtt/`:
 
 ## Data Model (DynamoDB Single-Table Design)
 
-All entities are stored in a single DynamoDB table using Partition Key (`pk`) and Sort Key (`sk`) to model relationships.
+All entities are stored in a single DynamoDB table using Partition Key (`pk`) and Sort Key (`sk`) to model relationships without Global Secondary Indexes (GSIs).
 
 ### Primary Table (`deezchatz-identity`)
 
 | Entity | `pk` | `sk` | Key Fields |
 |--------|------|------|------------|
 | **Profile** | `USER#{userId}` | `PROFILE` | `name`, `email`, `picture`, `iKey`, `signedPreKey`, `signature`, `opks`, `deviceId`, `signedDeviceKey`, `fcmToken`, `phone`, `createdAt`, `updatedAt` |
-| **Device** | `USER#{userId}` | `DEVICE#{deviceId}` | `signedDeviceKey`, `fcmToken` |
+| **Device** | `USER#{userId}` | `DEVICE#{deviceId}` | `signedDeviceKey`, `fcmToken`, `createdAt`, `updatedAt` |
+| **Email Pointer** | `EMAIL#{email}` | `PTR` | `userId` |
+| **Phone Pointer** | `PHONE#{phone}` | `PTR` | `userId` |
 
-### Global Secondary Index (`lookup-index`)
+### Base Table Lookups (Zero-GSI)
 
-| Lookup by | `pk` (GSI) | `sk` (GSI) | Returns |
-|-----------|-----------|-----------|---------|
-| **Email** | `user@example.com` | `PROFILE` | `userId` |
-| **Phone** | `+1234567890` | `PROFILE` | `userId` |
+| Lookup by | `pk` | `sk` | Returns |
+|-----------|------|------|---------|
+| **Email** | `EMAIL#{email}` | `PTR` | `userId` (followed by direct `USER#{userId}` profile fetch) |
+| **Phone** | `PHONE#{phone}` | `PTR` | `userId` (followed by direct `USER#{userId}` profile fetch) |
 
-This allows finding a user's `userId` by their email or phone number without a table scan.
+This allows finding a user's `userId` and profile by their email or phone number using direct primary key `GetItem` lookups with strong consistency and zero GSI cost.
 
 ### Redis (Temporary State)
 
@@ -197,7 +198,6 @@ pub struct AppState {
     pub http_client: reqwest::Client,    // Shared HTTP client (Google JWKS, FCM)
     pub push_provider: Arc<dyn PushProvider>,  // FCM (now), APNs (future)
     pub primary_table: String,
-    pub gsi_lookup_index: String,
     pub google_client_id: String,
     pub google_client_secret: String,
     pub google_redirect_uri: String,

@@ -1,5 +1,14 @@
 use axum::{body::Bytes, extract::State, http::StatusCode, response::IntoResponse};
+use lazy_static::lazy_static;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
+
+lazy_static! {
+    static ref TOPIC_REGEX: Regex = Regex::new(
+        r"^/deezchatz/(?P<rec_id>[^/]+)/(?P<rec_dev>[^/]+)/(?P<sen_id>[^/]+)/(?P<sen_dev>[^/]+)$"
+    )
+    .unwrap();
+}
 
 use crate::{
     db::{
@@ -221,21 +230,26 @@ pub async fn handle_offline_message(
         }
     };
 
-    if let WebhookPayload::OfflineMessage { topic, payload: msg_payload, .. } = payload {
+    if let WebhookPayload::OfflineMessage {
+        topic,
+        payload: msg_payload,
+        ..
+    } = payload
+    {
         tracing::info!("Received offline message for topic: {}", topic);
 
-        // Topic format: /deezchatz/{recipientId}/{recipientDeviceId}/{senderId}/{senderDeviceId}
-        // Split yields: ["", "deezchatz", recipientId, recipientDeviceId, senderId, senderDeviceId]
-        let parts: Vec<&str> = topic.split('/').collect();
-        if parts.len() == 6 && parts[1] == "deezchatz" {
-            let recipient_id = parts[2];
-            let recipient_device_id = parts[3];
-            let sender_id = parts[4];
-            let sender_device_id = parts[5];
+        if let Some(captures) = TOPIC_REGEX.captures(&topic) {
+            let recipient_id = captures.name("rec_id").unwrap().as_str();
+            let recipient_device_id = captures.name("rec_dev").unwrap().as_str();
+            let sender_id = captures.name("sen_id").unwrap().as_str();
+            let sender_device_id = captures.name("sen_dev").unwrap().as_str();
 
             tracing::info!(
                 "Offline message: recipient={}/{} sender={}/{}",
-                recipient_id, recipient_device_id, sender_id, sender_device_id
+                recipient_id,
+                recipient_device_id,
+                sender_id,
+                sender_device_id
             );
 
             let pk = format!("USER#{}", recipient_id);
@@ -258,14 +272,16 @@ pub async fn handle_offline_message(
                             Ok(()) => {
                                 tracing::info!(
                                     "Push notification sent to recipient={}/{}",
-                                    recipient_id, recipient_device_id
+                                    recipient_id,
+                                    recipient_device_id
                                 );
                             }
                             Err(PushError::TokenInvalid) => {
                                 // Token is stale (app uninstalled / token rotated) — clean up DB
                                 tracing::warn!(
                                     "Push token invalid for recipient={}/{}, clearing from DB",
-                                    recipient_id, recipient_device_id
+                                    recipient_id,
+                                    recipient_device_id
                                 );
                                 let _ = clear_device_fcm_token(&state, &pk, &sk).await;
                             }
@@ -276,13 +292,15 @@ pub async fn handle_offline_message(
                     } else {
                         tracing::warn!(
                             "No push token registered for recipient={}/{}",
-                            recipient_id, recipient_device_id
+                            recipient_id,
+                            recipient_device_id
                         );
                     }
                 }
                 Ok(None) => tracing::warn!(
                     "Device not found for offline message: recipient={}/{}",
-                    recipient_id, recipient_device_id
+                    recipient_id,
+                    recipient_device_id
                 ),
                 Err(e) => tracing::error!("Failed to fetch device: {:?}", e),
             }
@@ -299,6 +317,7 @@ pub async fn handle_offline_message(
             .await
             {
                 tracing::error!("Failed to persist offline message: {:?}", e);
+                return StatusCode::INTERNAL_SERVER_ERROR;
             }
         } else {
             tracing::warn!("Invalid topic format for offline message: {}", topic);

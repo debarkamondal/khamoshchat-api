@@ -1,7 +1,12 @@
+use crate::{error::AppError, state::AppState};
 use redis::AsyncCommands;
-use crate::{state::AppState, error::AppError};
 
-pub async fn set_temp_json(state: &AppState, key: &str, json_val: &str, ttl_secs: u64) -> Result<(), AppError> {
+pub async fn set_temp_json(
+    state: &AppState,
+    key: &str,
+    json_val: &str,
+    ttl_secs: u64,
+) -> Result<(), AppError> {
     let mut conn = state.redis.clone();
     conn.set_ex::<_, _, ()>(key, json_val, ttl_secs)
         .await
@@ -15,7 +20,12 @@ pub async fn set_temp_json(state: &AppState, key: &str, json_val: &str, ttl_secs
 /// Atomically sets a key only if it does not already exist (SET NX EX).
 /// Returns `true` if the key was newly created (safe to proceed).
 /// Returns `false` if the key already existed (replay detected — reject request).
-pub async fn set_temp_json_nx(state: &AppState, key: &str, json_val: &str, ttl_secs: u64) -> Result<bool, AppError> {
+pub async fn set_temp_json_nx(
+    state: &AppState,
+    key: &str,
+    json_val: &str,
+    ttl_secs: u64,
+) -> Result<bool, AppError> {
     let mut conn = state.redis.clone();
     // SET key value NX EX ttl — atomically set only if not exists
     let result: Option<String> = redis::cmd("SET")

@@ -78,13 +78,16 @@ impl FcmProvider {
     /// - `FCM_PROJECT_ID`
     /// - `FCM_SERVICE_ACCOUNT_KEY_PATH` — path to the service account JSON file
     pub fn from_env(http_client: reqwest::Client) -> Self {
-        let project_id = std::env::var("FCM_PROJECT_ID")
-            .expect("FCM_PROJECT_ID must be set");
+        let project_id = std::env::var("FCM_PROJECT_ID").expect("FCM_PROJECT_ID must be set");
         let key_path = std::env::var("FCM_SERVICE_ACCOUNT_KEY_PATH")
             .expect("FCM_SERVICE_ACCOUNT_KEY_PATH must be set");
 
-        let key_json = std::fs::read_to_string(&key_path)
-            .unwrap_or_else(|e| panic!("Failed to read FCM service account key at '{}': {}", key_path, e));
+        let key_json = std::fs::read_to_string(&key_path).unwrap_or_else(|e| {
+            panic!(
+                "Failed to read FCM service account key at '{}': {}",
+                key_path, e
+            )
+        });
         let key: ServiceAccountKey = serde_json::from_str(&key_json)
             .unwrap_or_else(|e| panic!("Failed to parse FCM service account key: {}", e));
 
@@ -103,7 +106,7 @@ impl FcmProvider {
     async fn get_access_token(&self) -> Result<String, PushError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
 
         // Fast path: read lock check
@@ -141,7 +144,8 @@ impl FcmProvider {
             .map_err(|e| PushError::Internal(format!("Failed to sign FCM JWT: {}", e)))?;
 
         // Exchange the signed JWT for an OAuth2 access token
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post(&self.token_uri)
             .form(&[
                 ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
@@ -149,7 +153,9 @@ impl FcmProvider {
             ])
             .send()
             .await
-            .map_err(|e| PushError::Internal(format!("FCM token exchange request failed: {}", e)))?;
+            .map_err(|e| {
+                PushError::Internal(format!("FCM token exchange request failed: {}", e))
+            })?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -160,16 +166,18 @@ impl FcmProvider {
             )));
         }
 
-        let token_resp: TokenResponse = resp
-            .json()
-            .await
-            .map_err(|e| PushError::Internal(format!("Failed to parse FCM token response: {}", e)))?;
+        let token_resp: TokenResponse = resp.json().await.map_err(|e| {
+            PushError::Internal(format!("Failed to parse FCM token response: {}", e))
+        })?;
 
         let expiry = now + token_resp.expires_in;
         let token = token_resp.access_token.clone();
         *cache = (expiry, token_resp.access_token);
 
-        tracing::info!("FCM OAuth2 access token refreshed, valid for {}s", token_resp.expires_in);
+        tracing::info!(
+            "FCM OAuth2 access token refreshed, valid for {}s",
+            token_resp.expires_in
+        );
         Ok(token)
     }
 
@@ -230,7 +238,8 @@ impl PushProvider for FcmProvider {
             }
         });
 
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post(&fcm_url)
             .bearer_auth(&access_token)
             .json(&message)
@@ -239,7 +248,10 @@ impl PushProvider for FcmProvider {
             .map_err(|e| PushError::Internal(format!("FCM HTTP request failed: {}", e)))?;
 
         if resp.status().is_success() {
-            tracing::info!("FCM push sent successfully to token '{}'", &token.value[..8.min(token.value.len())]);
+            tracing::info!(
+                "FCM push sent successfully to token '{}'",
+                &token.value[..8.min(token.value.len())]
+            );
             return Ok(());
         }
 
