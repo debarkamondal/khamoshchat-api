@@ -26,6 +26,15 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
             .and_then(|h| h.to_str().ok())
             .ok_or_else(|| AppError::Unauthorized("Missing X-User-Id header".to_string()))?;
 
+        // Validate UUID v4 format
+        let parsed_uuid = uuid::Uuid::parse_str(user_id)
+            .map_err(|_| AppError::Unauthorized("Invalid user ID format".to_string()))?;
+        if parsed_uuid.get_version_num() != 4 {
+            return Err(AppError::Unauthorized(
+                "Invalid user ID format: must be UUID v4".to_string(),
+            ));
+        }
+
         let timestamp_str = parts
             .headers
             .get("X-Timestamp")
@@ -65,7 +74,7 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
 
         // 2. Fetch User Profile
         let pk = user_pk(user_id);
-        let sk = "PROFILE";
+        let sk = crate::db::keys::profile_sk();
         let item_opt = get_item(state, &pk, sk).await?;
 
         let item = item_opt.ok_or_else(|| AppError::Unauthorized("User not found".to_string()))?;
@@ -93,8 +102,12 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
         let expected_vrf_bytes =
             crate::crypto::decode_b64_key(vrf_b64, crate::crypto::VRF_LENGTH, "vrf")?;
 
-        let public_key: [u8; 33] = signed_prekey_bytes.try_into().unwrap();
-        let sig: [u8; 96] = signature_bytes.try_into().unwrap();
+        let public_key: [u8; 33] = signed_prekey_bytes
+            .try_into()
+            .map_err(|_| AppError::Internal("Key length invariant violated".into()))?;
+        let sig: [u8; 96] = signature_bytes
+            .try_into()
+            .map_err(|_| AppError::Internal("Signature length invariant violated".into()))?;
 
         match verify_signature(&public_key, payload.as_bytes(), &sig) {
             Ok(output_vrf) => {

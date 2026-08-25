@@ -12,7 +12,7 @@ pub async fn set_temp_json(
         .await
         .map_err(|e| {
             tracing::error!("Redis set error: {}", e);
-            AppError::Internal(format!("Redis error: {e}"))
+            AppError::Internal("Internal server error".into())
         })?;
     Ok(())
 }
@@ -38,7 +38,7 @@ pub async fn set_temp_json_nx(
         .await
         .map_err(|e| {
             tracing::error!("Redis SET NX error: {}", e);
-            AppError::Internal(format!("Redis error: {e}"))
+            AppError::Internal("Internal server error".into())
         })?;
     // Redis returns "OK" if set, nil (None) if key already existed
     Ok(result.is_some())
@@ -48,7 +48,7 @@ pub async fn get_temp_json(state: &AppState, key: &str) -> Result<Option<String>
     let mut conn = state.redis.clone();
     let stored: Option<String> = conn.get(key).await.map_err(|e| {
         tracing::error!("Redis get error: {}", e);
-        AppError::Internal(format!("Redis error: {e}"))
+        AppError::Internal("Internal server error".into())
     })?;
     Ok(stored)
 }
@@ -57,7 +57,7 @@ pub async fn delete_temp_key(state: &AppState, key: &str) -> Result<(), AppError
     let mut conn = state.redis.clone();
     let _: () = conn.del(key).await.map_err(|e| {
         tracing::error!("Redis delete error: {}", e);
-        AppError::Internal(format!("Redis delete error: {e}"))
+        AppError::Internal("Internal server error".into())
     })?;
     Ok(())
 }

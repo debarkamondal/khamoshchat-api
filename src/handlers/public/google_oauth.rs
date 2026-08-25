@@ -42,7 +42,7 @@ pub async fn verify_id_token(
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        if cache.1.is_some() && now - cache.0 < 3600 {
+        if cache.1.is_some() && now < cache.0 {
             jwks = cache.1.clone();
         }
     }
@@ -57,7 +57,7 @@ pub async fn verify_id_token(
             .unwrap_or_default()
             .as_secs();
 
-        if cache.1.is_some() && now - cache.0 < 3600 {
+        if cache.1.is_some() && now < cache.0 {
             // Another concurrent request already refreshed the cache while we waited
             // for the write lock — reuse it.
             jwks = cache.1.clone();
@@ -71,22 +71,38 @@ pub async fn verify_id_token(
                 .await
                 .map_err(|e| {
                     tracing::error!("Failed to fetch JWKS: {}", e);
-                    AppError::BadGateway(format!("Failed to fetch JWKS: {}", e))
+                    AppError::BadGateway("Failed to fetch JWKS".into())
                 })?;
+
+            let max_age_secs = resp
+                .headers()
+                .get(reqwest::header::CACHE_CONTROL)
+                .and_then(|h| h.to_str().ok())
+                .and_then(|s| {
+                    s.split(',').find_map(|part| {
+                        let part = part.trim();
+                        part.strip_prefix("max-age=")
+                            .and_then(|val| val.trim().parse::<u64>().ok())
+                    })
+                })
+                .unwrap_or(3600)
+                .clamp(300, 86400);
+
             let fetched_jwks: jsonwebtoken::jwk::JwkSet = resp.json().await.map_err(|e| {
                 tracing::error!("Failed to parse JWKS: {}", e);
-                AppError::BadGateway(format!("Failed to parse JWKS: {}", e))
+                AppError::BadGateway("Failed to parse JWKS".into())
             })?;
             jwks = Some(fetched_jwks.clone());
-            cache.0 = now;
+            cache.0 = now + max_age_secs;
             cache.1 = Some(fetched_jwks);
+            tracing::info!(ttl_secs = max_age_secs, "Refreshed Google JWKS cache");
         }
     }
 
-    let jwks = jwks.unwrap();
+    let jwks = jwks.ok_or_else(|| AppError::Internal("JWKS unavailable".to_string()))?;
     let header = jsonwebtoken::decode_header(&req.id_token).map_err(|e| {
         tracing::error!("Invalid ID token header: {}", e);
-        AppError::BadRequest(format!("Invalid ID token header: {}", e))
+        AppError::BadRequest("Invalid ID token header".to_string())
     })?;
     let kid = header.kid.ok_or_else(|| {
         tracing::error!("Missing kid in ID token");
@@ -94,12 +110,12 @@ pub async fn verify_id_token(
     })?;
 
     let jwk = jwks.find(&kid).ok_or_else(|| {
-        tracing::error!("Unknown kid in ID token");
+        tracing::error!("Unknown kid in ID token: {}", kid);
         AppError::BadRequest("Unknown kid in ID token".to_string())
     })?;
     let decoding_key = jsonwebtoken::DecodingKey::from_jwk(jwk).map_err(|e| {
         tracing::error!("Invalid JWK: {}", e);
-        AppError::BadRequest(format!("Invalid JWK: {}", e))
+        AppError::BadRequest("Invalid JWK".to_string())
     })?;
 
     let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
@@ -110,7 +126,7 @@ pub async fn verify_id_token(
         jsonwebtoken::decode::<GoogleIdTokenClaims>(&req.id_token, &decoding_key, &validation)
             .map_err(|e| {
                 tracing::error!("Invalid ID token: {}", e);
-                AppError::Unauthorized(format!("Invalid ID token: {}", e))
+                AppError::Unauthorized("Invalid ID token".to_string())
             })?;
 
     let claims = token_data.claims;
@@ -121,7 +137,7 @@ pub async fn verify_id_token(
 
     // ── 2. Reuse existing userId if email pointer exists for claims.email, otherwise generate new userId ──
     let email_pk = email_lookup_pk(&claims.email);
-    let existing_pointer = get_item(&state, &email_pk, &lookup_sk()).await?;
+    let existing_pointer = get_item(&state, &email_pk, lookup_sk()).await?;
     let user_id = if let Some(ref item) = existing_pointer {
         item.get("userId")
             .and_then(|v| v.as_s().ok())
@@ -150,6 +166,8 @@ pub async fn verify_id_token(
 
     let redis_key = pending_reg_key(&user_id);
     set_temp_json(&state, &redis_key, &json_val, OAUTH_TTL_SECS).await?;
+
+    tracing::info!(user_id = %user_id, email = %claims.email, "Google ID token verified and pending registration cached");
 
     Ok(Json(serde_json::json!({
         "status": "success",

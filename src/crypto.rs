@@ -34,9 +34,15 @@ pub fn verify_signed_signature(
     let signature_bytes = decode_b64_key(signature_b64, SIGNATURE_LENGTH, "signature")?;
     let expected_vrf_bytes = decode_b64_key(vrf_b64, VRF_LENGTH, "vrf")?;
 
-    let i_key: [u8; 33] = identity_key_bytes.try_into().unwrap();
-    let target_key: [u8; 33] = target_key_bytes.try_into().unwrap();
-    let sig: [u8; 96] = signature_bytes.try_into().unwrap();
+    let i_key: [u8; 33] = identity_key_bytes
+        .try_into()
+        .map_err(|_| AppError::Internal("Key length invariant violated".into()))?;
+    let target_key: [u8; 33] = target_key_bytes
+        .try_into()
+        .map_err(|_| AppError::Internal("Key length invariant violated".into()))?;
+    let sig: [u8; 96] = signature_bytes
+        .try_into()
+        .map_err(|_| AppError::Internal("Signature length invariant violated".into()))?;
 
     match vxeddsa_verify(&i_key, &target_key, &sig) {
         Some(vrf) => {
@@ -63,5 +69,41 @@ pub fn verify_signature(
     match vxeddsa_verify(public_key_bytes, message, signature_bytes) {
         Some(vrf) => Ok(vrf),
         None => Err(AppError::Unauthorized("Invalid signature".into())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decode_b64_key_valid() {
+        let raw = [42u8; 33];
+        let b64 = general_purpose::STANDARD.encode(raw);
+        let decoded = decode_b64_key(&b64, 33, "test_key").expect("should decode");
+        assert_eq!(decoded.as_slice(), &raw);
+    }
+
+    #[test]
+    fn test_decode_b64_key_invalid_base64() {
+        let res = decode_b64_key("not-valid-b64!@#$", 33, "test_key");
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_decode_b64_key_wrong_length() {
+        let raw = [1u8; 16];
+        let b64 = general_purpose::STANDARD.encode(raw);
+        let res = decode_b64_key(&b64, 33, "test_key");
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_verify_signature_invalid() {
+        let pk = [0u8; 33];
+        let msg = b"test message";
+        let sig = [0u8; 96];
+        let res = verify_signature(&pk, msg, &sig);
+        assert!(res.is_err());
     }
 }

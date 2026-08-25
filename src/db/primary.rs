@@ -44,7 +44,7 @@ pub async fn resolve_user_by_identifier(
         )
     };
 
-    let pointer = get_item(state, &pk, &sk).await?;
+    let pointer = get_item(state, &pk, sk).await?;
     let pointer_item = match pointer {
         Some(item) => item,
         None => return Ok(None),
@@ -57,7 +57,7 @@ pub async fn resolve_user_by_identifier(
 
     let user_pk = crate::db::keys::user_pk(user_id);
     let profile_sk = crate::db::keys::profile_sk();
-    get_item(state, &user_pk, &profile_sk).await
+    get_item(state, &user_pk, profile_sk).await
 }
 
 pub async fn transact_write_items(
@@ -82,10 +82,7 @@ pub async fn transact_write_items(
                 "DynamoDB transact_write_items error: {}",
                 aws_sdk_dynamodb::error::DisplayErrorContext(&e)
             );
-            AppError::Internal(format!(
-                "Database error: {}",
-                aws_sdk_dynamodb::error::DisplayErrorContext(&e)
-            ))
+            AppError::Internal("Database error".into())
         })?;
 
     Ok(())
@@ -196,15 +193,11 @@ pub async fn put_offline_message(
     topic: &str,
     payload: &str,
 ) -> Result<(), AppError> {
-    let now_ms = SystemTime::now()
+    let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    let ttl_secs = (SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs())
-        + (30 * 24 * 60 * 60); // 30 days
+        .unwrap_or_default();
+    let now_ms = now.as_millis() as u64;
+    let ttl_secs = now.as_secs() + (30 * 24 * 60 * 60); // 30 days
 
     let pk = format!("USER#{}", recipient_id);
     let sk = format!("OFFLINE_MSG#{}#{}", now_ms, Uuid::new_v4());

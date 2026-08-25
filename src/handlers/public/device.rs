@@ -45,6 +45,14 @@ pub async fn register_device(
         return Err(AppError::BadRequest("Phone number is required".to_string()));
     }
 
+    let parsed_uuid = uuid::Uuid::parse_str(&req.user_id)
+        .map_err(|_| AppError::BadRequest("Invalid userId format: must be UUID".to_string()))?;
+    if parsed_uuid.get_version_num() != 4 {
+        return Err(AppError::BadRequest(
+            "Invalid userId format: must be UUID v4".to_string(),
+        ));
+    }
+
     // 1. Fetch pending record from Redis
     let redis_key = pending_reg_key(&req.user_id);
     let pending_json = get_temp_json(&state, &redis_key).await?;
@@ -53,8 +61,10 @@ pub async fn register_device(
         AppError::NotFound("Pending registration not found or expired".to_string())
     })?;
 
-    let pending_data: TempRegistration = serde_json::from_str(&pending_json)
-        .map_err(|e| AppError::Internal(format!("Corrupt pending registration data: {}", e)))?;
+    let pending_data: TempRegistration = serde_json::from_str(&pending_json).map_err(|e| {
+        tracing::error!("Corrupt pending registration data: {}", e);
+        AppError::Internal("Internal server error".to_string())
+    })?;
 
     // 2. Verify crypto
     verify_signed_signature(
@@ -74,7 +84,7 @@ pub async fn register_device(
 
     // 3. Check for existing profile to preserve device_id / createdAt if re-registering
     let pk = user_pk(&req.user_id);
-    let existing_profile_opt = crate::db::primary::get_item(&state, &pk, &profile_sk()).await?;
+    let existing_profile_opt = crate::db::primary::get_item(&state, &pk, profile_sk()).await?;
 
     let (device_id, created_at, existing_picture, old_phone) =
         if let Some(ref existing) = existing_profile_opt {
@@ -112,7 +122,10 @@ pub async fn register_device(
     // Profile Item (zero-GSI, no lookup attribute)
     let mut profile_item = HashMap::new();
     profile_item.insert("pk".to_string(), AttributeValue::S(pk.clone()));
-    profile_item.insert("sk".to_string(), AttributeValue::S(profile_sk()));
+    profile_item.insert(
+        "sk".to_string(),
+        AttributeValue::S(profile_sk().to_string()),
+    );
     profile_item.insert("name".to_string(), AttributeValue::S(pending_data.name));
     profile_item.insert(
         "email".to_string(),
@@ -179,7 +192,10 @@ pub async fn register_device(
         .table_name(&state.primary_table)
         .set_item(Some(profile_item))
         .build()
-        .map_err(|e| AppError::Internal(format!("Failed to build profile put: {}", e)))?;
+        .map_err(|e| {
+            tracing::error!("Failed to build profile put: {}", e);
+            AppError::Internal("Database error".to_string())
+        })?;
     transact_items.push(TransactWriteItem::builder().put(put_profile).build());
 
     // 2. Put Device
@@ -187,7 +203,10 @@ pub async fn register_device(
         .table_name(&state.primary_table)
         .set_item(Some(device_item))
         .build()
-        .map_err(|e| AppError::Internal(format!("Failed to build device put: {}", e)))?;
+        .map_err(|e| {
+            tracing::error!("Failed to build device put: {}", e);
+            AppError::Internal("Database error".to_string())
+        })?;
     transact_items.push(TransactWriteItem::builder().put(put_device).build());
 
     if existing_profile_opt.is_none() {
@@ -197,7 +216,7 @@ pub async fn register_device(
             "pk".to_string(),
             AttributeValue::S(email_lookup_pk(&pending_data.email)),
         );
-        email_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk()));
+        email_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk().to_string()));
         email_pointer.insert("userId".to_string(), AttributeValue::S(req.user_id.clone()));
 
         let put_email_ptr = Put::builder()
@@ -205,7 +224,10 @@ pub async fn register_device(
             .set_item(Some(email_pointer))
             .condition_expression("attribute_not_exists(pk)")
             .build()
-            .map_err(|e| AppError::Internal(format!("Failed to build email pointer put: {}", e)))?;
+            .map_err(|e| {
+                tracing::error!("Failed to build email pointer put: {}", e);
+                AppError::Internal("Database error".to_string())
+            })?;
         transact_items.push(TransactWriteItem::builder().put(put_email_ptr).build());
 
         let mut phone_pointer = HashMap::new();
@@ -213,7 +235,7 @@ pub async fn register_device(
             "pk".to_string(),
             AttributeValue::S(phone_lookup_pk(&req.phone)),
         );
-        phone_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk()));
+        phone_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk().to_string()));
         phone_pointer.insert("userId".to_string(), AttributeValue::S(req.user_id.clone()));
 
         let put_phone_ptr = Put::builder()
@@ -221,7 +243,10 @@ pub async fn register_device(
             .set_item(Some(phone_pointer))
             .condition_expression("attribute_not_exists(pk)")
             .build()
-            .map_err(|e| AppError::Internal(format!("Failed to build phone pointer put: {}", e)))?;
+            .map_err(|e| {
+                tracing::error!("Failed to build phone pointer put: {}", e);
+                AppError::Internal("Database error".to_string())
+            })?;
         transact_items.push(TransactWriteItem::builder().put(put_phone_ptr).build());
     } else {
         // Re-registering user:
@@ -238,13 +263,11 @@ pub async fn register_device(
                     let delete_old_phone_ptr = Delete::builder()
                         .table_name(&state.primary_table)
                         .key("pk", AttributeValue::S(phone_lookup_pk(old)))
-                        .key("sk", AttributeValue::S(lookup_sk()))
+                        .key("sk", AttributeValue::S(lookup_sk().to_string()))
                         .build()
                         .map_err(|e| {
-                            AppError::Internal(format!(
-                                "Failed to build delete phone pointer: {}",
-                                e
-                            ))
+                            tracing::error!("Failed to build delete phone pointer: {}", e);
+                            AppError::Internal("Database error".to_string())
                         })?;
                     transact_items.push(
                         TransactWriteItem::builder()
@@ -259,7 +282,7 @@ pub async fn register_device(
                 "pk".to_string(),
                 AttributeValue::S(phone_lookup_pk(&req.phone)),
             );
-            new_phone_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk()));
+            new_phone_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk().to_string()));
             new_phone_pointer.insert("userId".to_string(), AttributeValue::S(req.user_id.clone()));
 
             let put_new_phone_ptr = Put::builder()
@@ -268,7 +291,8 @@ pub async fn register_device(
                 .condition_expression("attribute_not_exists(pk)")
                 .build()
                 .map_err(|e| {
-                    AppError::Internal(format!("Failed to build new phone pointer put: {}", e))
+                    tracing::error!("Failed to build new phone pointer put: {}", e);
+                    AppError::Internal("Database error".to_string())
                 })?;
             transact_items.push(TransactWriteItem::builder().put(put_new_phone_ptr).build());
         }
@@ -279,6 +303,8 @@ pub async fn register_device(
 
     // 4. Delete Redis key
     let _ = delete_temp_key(&state, &redis_key).await;
+
+    tracing::info!(user_id = %req.user_id, device_id = %device_id, "Device registered successfully");
 
     // 5. Response
     Ok(Json(serde_json::json!({
@@ -300,11 +326,16 @@ pub async fn update_fcm_token(
     auth_user: crate::auth::signature::AuthenticatedUser,
     Json(req): Json<UpdateFcmTokenRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    uuid::Uuid::parse_str(&req.device_id)
+        .map_err(|_| AppError::BadRequest("Invalid deviceId format: must be UUID".to_string()))?;
+
     let pk = user_pk(&auth_user.user_id);
     let sk = device_sk(&req.device_id);
 
     // Update FCM token in DynamoDB
     crate::db::primary::update_item_fcm(&state, &pk, &sk, &req.fcm_token).await?;
+
+    tracing::info!(user_id = %auth_user.user_id, device_id = %req.device_id, "FCM token updated successfully");
 
     Ok(Json(serde_json::json!({
         "status": "success",

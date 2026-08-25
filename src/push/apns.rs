@@ -13,6 +13,8 @@ pub struct ApnsProvider;
 #[async_trait]
 impl PushProvider for ApnsProvider {
     async fn send(&self, _token: &PushToken, _payload: &WakeUpPayload) -> Result<(), PushError> {
-        unimplemented!("APNs push delivery is not yet implemented — use FCM for Android devices")
+        Err(PushError::Internal(
+            "APNs push delivery is not yet implemented — use FCM for Android devices".to_string(),
+        ))
     }
 }

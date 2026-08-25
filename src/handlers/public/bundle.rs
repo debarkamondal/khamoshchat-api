@@ -50,13 +50,23 @@ pub async fn get_bundle(
     Path(identifier): Path<String>,
     _auth_user: AuthenticatedUser, // Requires valid signature
 ) -> Result<Json<PreKeyBundle>, AppError> {
-    if identifier.is_empty() {
+    if identifier.trim().is_empty() {
         return Err(AppError::BadRequest("Missing identifier".to_string()));
     }
 
     // 1. Dual-path lookup strategy
     let is_email = identifier.contains('@');
-    let is_phone = identifier.starts_with('+') || identifier.chars().all(|c| c.is_ascii_digit());
+    let is_phone = identifier.starts_with('+')
+        || (!identifier.is_empty() && identifier.chars().all(|c| c.is_ascii_digit()));
+
+    if !is_email && !is_phone {
+        // Must be a valid UUID
+        uuid::Uuid::parse_str(&identifier).map_err(|_| {
+            AppError::BadRequest(
+                "Invalid identifier format: must be email, phone number, or UUID".to_string(),
+            )
+        })?;
+    }
 
     let mut retries = 5;
     loop {
@@ -66,7 +76,7 @@ pub async fn get_bundle(
         } else {
             // Assume userId -> query base table directly
             let pk = user_pk(&identifier);
-            get_item(&state, &pk, &profile_sk()).await?
+            get_item(&state, &pk, profile_sk()).await?
         };
 
         let item = profile_item_opt
@@ -96,22 +106,29 @@ pub async fn get_bundle(
         let mut opk = None;
         if !profile.opks.is_empty() {
             let last_index = profile.opks.len() - 1;
-            let last_opk = profile.opks.last().unwrap().clone();
+            let last_opk = profile
+                .opks
+                .last()
+                .ok_or_else(|| AppError::Internal("OPKs unexpectedly empty".to_string()))?
+                .clone();
 
             opk = Some(Opk {
                 id: last_index,
                 key: last_opk.clone(),
             });
 
-            match pop_opk(&state, &pk, "PROFILE", last_index, &last_opk).await {
+            match pop_opk(&state, &pk, profile_sk(), last_index, &last_opk).await {
                 Ok(_) => {}
                 Err(AppError::Conflict(_)) => {
                     if retries > 0 {
                         retries -= 1;
+                        let delay_ms = 50u64 * 2u64.pow((4 - retries) as u32);
                         tracing::warn!(
-                            "OPK conflict detected. Retrying get_bundle... Retries left: {}",
-                            retries
+                            retries_left = retries,
+                            delay_ms = delay_ms,
+                            "OPK conflict detected. Retrying get_bundle with backoff..."
                         );
+                        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
                         continue;
                     } else {
                         return Err(AppError::Conflict(
@@ -143,12 +160,20 @@ pub async fn get_sync_bundle(
     Path(user_id): Path<String>,
     _auth_user: AuthenticatedUser,
 ) -> Result<Json<SyncBundle>, AppError> {
-    if user_id.is_empty() {
+    if user_id.trim().is_empty() {
         return Err(AppError::BadRequest("Missing userId".to_string()));
     }
 
+    let parsed_uuid = uuid::Uuid::parse_str(&user_id)
+        .map_err(|_| AppError::BadRequest("Invalid userId format: must be UUID".to_string()))?;
+    if parsed_uuid.get_version_num() != 4 {
+        return Err(AppError::BadRequest(
+            "Invalid userId format: must be UUID v4".to_string(),
+        ));
+    }
+
     let pk = user_pk(&user_id);
-    let item = get_item(&state, &pk, &profile_sk())
+    let item = get_item(&state, &pk, profile_sk())
         .await?
         .ok_or_else(|| AppError::NotFound("Requested user not found".to_string()))?;
 

@@ -57,13 +57,13 @@ impl AppState {
         let primary_table = std::env::var("PRIMARY_TABLE").expect("PRIMARY_TABLE must be set");
         let google_client_id =
             std::env::var("GOOGLE_CLIENT_ID").expect("GOOGLE_CLIENT_ID must be set");
-        let google_client_secret =
-            std::env::var("GOOGLE_CLIENT_SECRET").expect("GOOGLE_CLIENT_SECRET must be set");
-        let google_redirect_uri =
-            std::env::var("GOOGLE_REDIRECT_URI").expect("GOOGLE_REDIRECT_URI must be set");
+        let google_client_secret = std::env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default();
+        let google_redirect_uri = std::env::var("GOOGLE_REDIRECT_URI").unwrap_or_default();
 
-        tracing::info!("Initializing shared HTTP client...");
+        tracing::info!("Initializing shared HTTP client with timeouts...");
         let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .connect_timeout(std::time::Duration::from_secs(5))
             .build()
             .expect("Failed to build HTTP client");
 
