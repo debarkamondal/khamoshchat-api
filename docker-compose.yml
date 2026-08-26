@@ -1,5 +1,6 @@
 services:
   # api:
+  #   container_name: deezchatz-api
   #   build:
   #     context: .
   #     dockerfile: Containerfile
@@ -14,11 +15,13 @@ services:
   #     - redis
 
   redis:
+    container_name: redis
     image: redis:latest
     ports:
       - "6379:6379"
 
   rmqtt:
+    container_name: rmqtt
     image: docker.io/rmqtt/rmqtt:latest
     ports:
       - "1883:1883"
