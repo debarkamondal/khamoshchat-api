@@ -1,0 +1,85 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.4.0] - 2026-08-26
+
+### Breaking Changes
+- **Strict UUID v4 Format Validation**: The `X-User-Id` request header, user ID path parameters (`/bundle/{identifier}` when non-email/phone, `/bundle/sync/{userId}`), and device registration payloads now strictly require valid UUID v4 strings. Malformed or non-v4 UUIDs are immediately rejected with HTTP `400 Bad Request` or `401 Unauthorized`.
+- **Sanitized 500 Error Responses**: Internal Redis and DynamoDB error details are no longer exposed in HTTP 500 error response JSON. Clients relying on specific internal error strings in response bodies will now receive generic error messages.
+
+### Security
+- Sanitized internal error responses from Redis and DynamoDB in `500 Internal Server Error` payloads to prevent infrastructure details and connection string leakage.
+- Added strict UUID v4 input validation for `X-User-Id` request headers, bundle lookup parameters, and device registration payloads.
+- Implemented dynamic Google JWKS caching that parses and honors HTTP `Cache-Control: max-age` response headers (clamped between 300s and 86400s) to support key rotation without cold-start penalties.
+
+### Performance
+- Added explicit request (10s) and connect (5s) timeouts to the shared outbound `reqwest::Client`.
+- Implemented exponential back-off (50ms, 100ms, 200ms, 400ms) in the One-Time Prekey (OPK) conflict retry loop.
+- Optimized `put_offline_message` by computing `SystemTime::now()` once for both millisecond timestamps and 30-day TTL seconds.
+- Switched DynamoDB sort key functions (`profile_sk`, `lookup_sk`) to return `&'static str` to eliminate heap allocations per request.
+
+### Quality & Reliability
+- Replaced `lazy_static` macro with standard library `std::sync::LazyLock` for static topic regex compilation and removed `lazy_static` from dependencies.
+- Eliminated `.unwrap()` calls on byte array conversions and option lookups across hot request paths.
+- Replaced panicking `unimplemented!()` in `ApnsProvider` with graceful `Err(PushError::Internal)`.
+- Added explicit logging and handling for FCM push provider `RateLimit` errors.
+- Made unused OAuth credentials (`GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`) fall back to default values to avoid unnecessary startup panics.
+- Added unit test suite covering Base64 key decoding, signature validation rejection, DB key normalization, and MQTT topic regex parsing.
+- Pinned `redis` image in `docker-compose.yml` to `redis:7-alpine`.
+- Pinned GitHub Actions workflow steps in `podman-push.yml` to full commit SHAs.
+
+---
+
+## [0.3.0] - 2026-08-25
+
+### Breaking Changes
+- **DynamoDB Zero-GSI Schema Migration**: Replaced Global Secondary Index lookups with direct primary key pointer items (`EMAIL#<email>` and `PHONE#<phone>`). Existing databases require pointer records to be populated for lookups to resolve.
+- **Rebranding & MQTT Topic Namespace**: Rebranded the API and renamed message topics to `/deezchatz/{rec_id}/{rec_dev}/{sen_id}/{sen_dev}`. Clients publishing or subscribing to legacy `/khamosh/...` or `/nijhum/...` topics must update their topic format.
+
+### Added
+- Direct pointer-based lookup items (`EMAIL#<email>` and `PHONE#<phone>`) in DynamoDB to eliminate Global Secondary Indexes (GSIs).
+- Transactional write support (`transact_write_items`) for atomic user registration and re-registration.
+
+### Changed
+- Project rebranded to **DeezChatz**.
+- Consolidated device attributes directly into `Profile` records for single-device operations.
+- Revamped architecture, cryptographic flow, and developer documentation (`AGENTS.md`).
+
+---
+
+## [0.2.0] - 2026-08-24
+
+### Breaking Changes
+- **Server-Generated Device Identifiers**: Client-supplied device IDs during initial registration are no longer accepted; `deviceId` is now assigned server-side as a UUID v4 and returned in the registration response.
+- **CamelCase DTO Serialization**: Standardized payload fields to strict `camelCase` (e.g., `signedDeviceKey`, `signedPreKey`, `fcmToken`, `deviceId`).
+- **Strict Timestamp Drift Window**: Reduced the allowed timestamp drift window for VXEdDSA signature authentication from 60 seconds to 10 seconds.
+
+### Added
+- User re-registration support preserving existing device IDs and creation metadata.
+- Direct user lookup by email.
+- Modular push notification provider architecture with FCM HTTP v1 support and APNs stub.
+- DynamoDB offline message persistence with automatic 30-day TTL expiry.
+- Bundle sync endpoint (`/bundle/sync/{userId}`) for lightweight profile and identity key lookups.
+- Optional phone and profile picture fields in key bundle response payloads.
+- Atomic Redis `SET NX` support for signature replay protection.
+
+### Changed
+- Migrated device ID generation from client to server during registration.
+- Standardized API DTO naming and serialization conventions using `camelCase`.
+- Tightened authentication timestamp drift threshold to 10 seconds.
+
+---
+
+## [0.1.0] - 2026-08-20
+
+### Added
+- Initial release of the zero-trust identity and key server.
+- Stateless signature authentication using VXEdDSA and VRF verification via `libsignal-dezire`.
+- Google OAuth ID token verification for user registration.
+- X3DH Prekey Bundle serving (`/bundle/{identifier}`) and One-Time Prekey (OPK) popping.
+- RMQTT broker webhook integration on isolated internal port 3001 for offline message routing.
+- Docker / Podman containerization and GHCR release workflow.
