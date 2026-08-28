@@ -5,6 +5,7 @@ FROM rust:1.98.0-alpine3.24 AS builder
 RUN apk add --no-cache \
     build-base \
     openssl-dev \
+    openssl-libs-static \
     pkgconfig \
     git \
     cmake \
