@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-08-28
+
+### Performance & Container Optimization
+- **Alpine Base Migration**: Migrated builder image to `rust:1.98.0-alpine3.24` and runtime image to `alpine:3.24.1`, significantly reducing container footprint.
+- **Eliminated Layer Duplication**: Fixed file ownership assignment via `COPY --chown=rocky:rocky` instead of a separate `RUN chown` step.
+- **Cargo Release Profile**: Added `[profile.release]` with `lto = true`, `strip = true`, `codegen-units = 1`, and `panic = "abort"` to reduce binary size and improve runtime efficiency.
+
+---
+
 ## [0.4.1] - 2026-08-26
 
 ### Fixed
