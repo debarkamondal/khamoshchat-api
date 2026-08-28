@@ -1,15 +1,15 @@
 # Build Stage
-FROM rust:1-slim-bookworm AS builder
+FROM rust:1.98.0-alpine3.24 AS builder
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libssl-dev \
-    pkg-config \
+RUN apk add --no-cache \
+    build-base \
+    openssl-dev \
+    pkgconfig \
     git \
     cmake \
     make \
-    perl \
-    && rm -rf /var/lib/apt/lists/*
+    perl
 
 WORKDIR /app
 
@@ -23,27 +23,25 @@ COPY . .
 RUN touch src/main.rs && cargo build --release
 
 # Runtime Stage
-FROM debian:bookworm-slim
+FROM alpine:3.24.1
 
 # OCI metadata
 LABEL org.opencontainers.image.source="https://github.com/deez-in/deezchatz-api"
 LABEL org.opencontainers.image.description="DeezChatz API server"
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
     ca-certificates \
-    libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+    libssl3
 
 # Non-root user (UID/GID 1000 to match host rocky user for keep-id)
-RUN groupadd --gid 1000 rocky && useradd --uid 1000 --gid 1000 --create-home rocky
+RUN addgroup -g 1000 rocky && adduser -u 1000 -G rocky -D rocky
 
 WORKDIR /app
 
-# Copy the binary from the builder stage
-COPY --from=builder /app/target/release/deezchatz-api /app/deezchatz-api
+# Copy the binary from the builder stage with proper ownership
+COPY --from=builder --chown=rocky:rocky /app/target/release/deezchatz-api /app/deezchatz-api
 
-RUN chown -R rocky:rocky /app
 USER rocky
 
 # Expose the API ports
