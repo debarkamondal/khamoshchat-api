@@ -18,6 +18,7 @@ use crate::{
 #[serde(rename_all = "camelCase")]
 pub struct GoogleIdTokenRequest {
     pub id_token: String,
+    pub i_key: String,
 }
 
 #[derive(Deserialize)]
@@ -153,6 +154,8 @@ pub async fn verify_id_token(
         .as_millis() as u64;
 
     let pending_data = TempRegistration {
+        user_id: user_id.clone(),
+        i_key: req.i_key,
         email: claims.email.clone(),
         name: claims.name.clone().unwrap_or_default(),
         picture: claims.picture.clone(),
@@ -164,7 +167,8 @@ pub async fn verify_id_token(
         AppError::Internal("Serialization error".to_string())
     })?;
 
-    let redis_key = pending_reg_key(&user_id);
+    let state_token = Uuid::new_v4().to_string();
+    let redis_key = pending_reg_key(&state_token);
     set_temp_json(&state, &redis_key, &json_val, OAUTH_TTL_SECS).await?;
 
     tracing::info!(user_id = %user_id, email = %claims.email, "Google ID token verified and pending registration cached");
@@ -172,6 +176,7 @@ pub async fn verify_id_token(
     Ok(Json(serde_json::json!({
         "status": "success",
         "userId": user_id,
+        "state": state_token,
         "email": claims.email,
         "name": claims.name,
         "picture": claims.picture,

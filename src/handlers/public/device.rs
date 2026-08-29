@@ -23,9 +23,10 @@ use crate::{
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegisterDeviceRequest {
-    pub user_id: String,
+    pub state: String,
+    pub state_signature: String,
+    pub state_vrf: String,
     pub phone: String,
-    pub i_key: String,
     pub signed_pre_key: String,
     pub pre_key_sign: String,
     pub pre_key_vrf: String,
@@ -45,16 +46,16 @@ pub async fn register_device(
         return Err(AppError::BadRequest("Phone number is required".to_string()));
     }
 
-    let parsed_uuid = uuid::Uuid::parse_str(&req.user_id)
-        .map_err(|_| AppError::BadRequest("Invalid userId format: must be UUID".to_string()))?;
+    let parsed_uuid = uuid::Uuid::parse_str(&req.state)
+        .map_err(|_| AppError::BadRequest("Invalid state format: must be UUID".to_string()))?;
     if parsed_uuid.get_version_num() != 4 {
         return Err(AppError::BadRequest(
-            "Invalid userId format: must be UUID v4".to_string(),
+            "Invalid state format: must be UUID v4".to_string(),
         ));
     }
 
-    // 1. Fetch pending record from Redis
-    let redis_key = pending_reg_key(&req.user_id);
+    // 1. Fetch pending record from Redis using state token
+    let redis_key = pending_reg_key(&req.state);
     let pending_json = get_temp_json(&state, &redis_key).await?;
 
     let pending_json = pending_json.ok_or_else(|| {
@@ -67,15 +68,31 @@ pub async fn register_device(
     })?;
 
     // 2. Verify crypto
+    let i_key_bytes = crate::crypto::decode_b64_key(&pending_data.i_key, crate::crypto::PUBLIC_KEY_LENGTH, "iKey")?;
+    let state_sig_bytes = crate::crypto::decode_b64_key(&req.state_signature, crate::crypto::SIGNATURE_LENGTH, "stateSignature")?;
+    let state_vrf_bytes = crate::crypto::decode_b64_key(&req.state_vrf, crate::crypto::VRF_LENGTH, "stateVrf")?;
+
+    let public_key: [u8; 33] = i_key_bytes
+        .try_into()
+        .map_err(|_| AppError::Internal("Key length invariant violated".into()))?;
+    let sig: [u8; 96] = state_sig_bytes
+        .try_into()
+        .map_err(|_| AppError::Internal("Signature length invariant violated".into()))?;
+
+    let vrf = crate::crypto::verify_signature(&public_key, req.state.as_bytes(), &sig)?;
+    if vrf != state_vrf_bytes.as_slice() {
+        return Err(AppError::Unauthorized("VRF mismatch for state".to_string()));
+    }
+
     verify_signed_signature(
-        &req.i_key,
+        &pending_data.i_key,
         &req.signed_pre_key,
         &req.pre_key_sign,
         &req.pre_key_vrf,
         "signedPreKey",
     )?;
     verify_signed_signature(
-        &req.i_key,
+        &pending_data.i_key,
         &req.signed_device_key,
         &req.dev_key_sign,
         &req.dev_key_vrf,
@@ -83,7 +100,7 @@ pub async fn register_device(
     )?;
 
     // 3. Check for existing profile to preserve device_id / createdAt if re-registering
-    let pk = user_pk(&req.user_id);
+    let pk = user_pk(&pending_data.user_id);
     let existing_profile_opt = crate::db::primary::get_item(&state, &pk, profile_sk()).await?;
 
     let (device_id, created_at, existing_picture, old_phone) =
@@ -136,7 +153,7 @@ pub async fn register_device(
         profile_item.insert("picture".to_string(), AttributeValue::S(pic));
     }
 
-    profile_item.insert("iKey".to_string(), AttributeValue::S(req.i_key));
+    profile_item.insert("iKey".to_string(), AttributeValue::S(pending_data.i_key.clone()));
     profile_item.insert(
         "signedPreKey".to_string(),
         AttributeValue::S(req.signed_pre_key),
@@ -217,7 +234,7 @@ pub async fn register_device(
             AttributeValue::S(email_lookup_pk(&pending_data.email)),
         );
         email_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk().to_string()));
-        email_pointer.insert("userId".to_string(), AttributeValue::S(req.user_id.clone()));
+        email_pointer.insert("userId".to_string(), AttributeValue::S(pending_data.user_id.clone()));
 
         let put_email_ptr = Put::builder()
             .table_name(&state.primary_table)
@@ -236,7 +253,7 @@ pub async fn register_device(
             AttributeValue::S(phone_lookup_pk(&req.phone)),
         );
         phone_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk().to_string()));
-        phone_pointer.insert("userId".to_string(), AttributeValue::S(req.user_id.clone()));
+        phone_pointer.insert("userId".to_string(), AttributeValue::S(pending_data.user_id.clone()));
 
         let put_phone_ptr = Put::builder()
             .table_name(&state.primary_table)
@@ -283,7 +300,7 @@ pub async fn register_device(
                 AttributeValue::S(phone_lookup_pk(&req.phone)),
             );
             new_phone_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk().to_string()));
-            new_phone_pointer.insert("userId".to_string(), AttributeValue::S(req.user_id.clone()));
+            new_phone_pointer.insert("userId".to_string(), AttributeValue::S(pending_data.user_id.clone()));
 
             let put_new_phone_ptr = Put::builder()
                 .table_name(&state.primary_table)
@@ -304,12 +321,12 @@ pub async fn register_device(
     // 4. Delete Redis key
     let _ = delete_temp_key(&state, &redis_key).await;
 
-    tracing::info!(user_id = %req.user_id, device_id = %device_id, "Device registered successfully");
+    tracing::info!(user_id = %pending_data.user_id, device_id = %device_id, "Device registered successfully");
 
     // 5. Response
     Ok(Json(serde_json::json!({
         "status": "success",
-        "userId": req.user_id,
+        "userId": pending_data.user_id,
         "deviceId": device_id,
     })))
 }

@@ -115,15 +115,10 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
                     return Err(AppError::Unauthorized("VRF mismatch".to_string()));
                 }
 
-                // Redis replay protection — TTL varies by HTTP method:
-                // - POST: 10 seconds (full window; state-mutating, must not replay)
-                // - GET:  3 seconds  (short window; read-only, allows quick client retries)
-                // Uses atomic SET NX to eliminate the check-then-set race condition.
-                let replay_ttl = if parts.method == axum::http::Method::POST {
-                    10
-                } else {
-                    3
-                };
+                // Redis replay protection: TTL must outlast the timestamp drift window (+10s and -10s).
+                // A fixed TTL of 20 seconds ensures a replay signature remains cached until 
+                // its underlying timestamp expires completely.
+                let replay_ttl = 20;
                 let replay_key = format!("replay:sig:{}", signature_b64);
                 let was_set =
                     crate::db::temp::set_temp_json_nx(state, &replay_key, "1", replay_ttl).await?;
