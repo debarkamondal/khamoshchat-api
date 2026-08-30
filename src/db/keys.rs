@@ -26,6 +26,10 @@ pub fn lookup_sk() -> &'static str {
     "PTR"
 }
 
+pub fn reporter_pk(reporter_id: &str) -> String {
+    format!("REPORTER#{}", reporter_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -33,6 +37,11 @@ mod tests {
     #[test]
     fn test_user_pk() {
         assert_eq!(user_pk("user-123"), "USER#user-123");
+    }
+
+    #[test]
+    fn test_reporter_pk() {
+        assert_eq!(reporter_pk("reporter-789"), "REPORTER#reporter-789");
     }
 
     #[test]

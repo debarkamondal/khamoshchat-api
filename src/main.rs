@@ -8,7 +8,7 @@ mod push;
 mod state;
 
 use axum::{
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use state::AppState;
@@ -53,6 +53,8 @@ async fn main() {
             "/register/device/fcm",
             post(handlers::public::device::update_fcm_token),
         )
+        .route("/users/me", delete(handlers::public::user::delete_account))
+        .route("/users/report", post(handlers::public::user::report_user))
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
 

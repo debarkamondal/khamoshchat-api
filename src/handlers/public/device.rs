@@ -68,9 +68,18 @@ pub async fn register_device(
     })?;
 
     // 2. Verify crypto
-    let i_key_bytes = crate::crypto::decode_b64_key(&pending_data.i_key, crate::crypto::PUBLIC_KEY_LENGTH, "iKey")?;
-    let state_sig_bytes = crate::crypto::decode_b64_key(&req.state_signature, crate::crypto::SIGNATURE_LENGTH, "stateSignature")?;
-    let state_vrf_bytes = crate::crypto::decode_b64_key(&req.state_vrf, crate::crypto::VRF_LENGTH, "stateVrf")?;
+    let i_key_bytes = crate::crypto::decode_b64_key(
+        &pending_data.i_key,
+        crate::crypto::PUBLIC_KEY_LENGTH,
+        "iKey",
+    )?;
+    let state_sig_bytes = crate::crypto::decode_b64_key(
+        &req.state_signature,
+        crate::crypto::SIGNATURE_LENGTH,
+        "stateSignature",
+    )?;
+    let state_vrf_bytes =
+        crate::crypto::decode_b64_key(&req.state_vrf, crate::crypto::VRF_LENGTH, "stateVrf")?;
 
     let public_key: [u8; 33] = i_key_bytes
         .try_into()
@@ -153,7 +162,10 @@ pub async fn register_device(
         profile_item.insert("picture".to_string(), AttributeValue::S(pic));
     }
 
-    profile_item.insert("iKey".to_string(), AttributeValue::S(pending_data.i_key.clone()));
+    profile_item.insert(
+        "iKey".to_string(),
+        AttributeValue::S(pending_data.i_key.clone()),
+    );
     profile_item.insert(
         "signedPreKey".to_string(),
         AttributeValue::S(req.signed_pre_key),
@@ -234,7 +246,10 @@ pub async fn register_device(
             AttributeValue::S(email_lookup_pk(&pending_data.email)),
         );
         email_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk().to_string()));
-        email_pointer.insert("userId".to_string(), AttributeValue::S(pending_data.user_id.clone()));
+        email_pointer.insert(
+            "userId".to_string(),
+            AttributeValue::S(pending_data.user_id.clone()),
+        );
 
         let put_email_ptr = Put::builder()
             .table_name(&state.primary_table)
@@ -253,7 +268,10 @@ pub async fn register_device(
             AttributeValue::S(phone_lookup_pk(&req.phone)),
         );
         phone_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk().to_string()));
-        phone_pointer.insert("userId".to_string(), AttributeValue::S(pending_data.user_id.clone()));
+        phone_pointer.insert(
+            "userId".to_string(),
+            AttributeValue::S(pending_data.user_id.clone()),
+        );
 
         let put_phone_ptr = Put::builder()
             .table_name(&state.primary_table)
@@ -300,7 +318,10 @@ pub async fn register_device(
                 AttributeValue::S(phone_lookup_pk(&req.phone)),
             );
             new_phone_pointer.insert("sk".to_string(), AttributeValue::S(lookup_sk().to_string()));
-            new_phone_pointer.insert("userId".to_string(), AttributeValue::S(pending_data.user_id.clone()));
+            new_phone_pointer.insert(
+                "userId".to_string(),
+                AttributeValue::S(pending_data.user_id.clone()),
+            );
 
             let put_new_phone_ptr = Put::builder()
                 .table_name(&state.primary_table)

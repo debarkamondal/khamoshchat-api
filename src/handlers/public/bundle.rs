@@ -28,6 +28,7 @@ pub struct PreKeyBundle {
     pub user_id: String,
     pub device_id: String,
     pub identity_key: String,
+    pub spk_id: u32,
     pub signed_pre_key: String,
     pub signature: String,
     pub phone: Option<String>,
@@ -146,6 +147,7 @@ pub async fn get_bundle(
             user_id,
             device_id,
             identity_key,
+            spk_id: 1,
             signed_pre_key,
             signature,
             phone,
@@ -195,4 +197,41 @@ pub async fn get_sync_bundle(
         picture: profile.picture,
         display_name: profile.name,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prekey_bundle_serialization() {
+        let bundle = PreKeyBundle {
+            user_id: "test-user-id".to_string(),
+            device_id: "test-device-id".to_string(),
+            identity_key: "ik-base64".to_string(),
+            spk_id: 1,
+            signed_pre_key: "spk-base64".to_string(),
+            signature: "sig-base64".to_string(),
+            phone: Some("+1234567890".to_string()),
+            picture: Some("https://example.com/pic.jpg".to_string()),
+            opk: Some(Opk {
+                id: 42,
+                key: "opk-key-base64".to_string(),
+            }),
+        };
+
+        let json = serde_json::to_string(&bundle).expect("should serialize PreKeyBundle");
+        let v: serde_json::Value = serde_json::from_str(&json).expect("should parse JSON");
+
+        assert_eq!(v["spkId"], 1);
+        assert_eq!(v["userId"], "test-user-id");
+        assert_eq!(v["deviceId"], "test-device-id");
+        assert_eq!(v["identityKey"], "ik-base64");
+        assert_eq!(v["signedPreKey"], "spk-base64");
+        assert_eq!(v["signature"], "sig-base64");
+        assert_eq!(v["phone"], "+1234567890");
+        assert_eq!(v["picture"], "https://example.com/pic.jpg");
+        assert_eq!(v["opk"]["id"], 42);
+        assert_eq!(v["opk"]["key"], "opk-key-base64");
+    }
 }

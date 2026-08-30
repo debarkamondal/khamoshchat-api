@@ -116,7 +116,7 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
                 }
 
                 // Redis replay protection: TTL must outlast the timestamp drift window (+10s and -10s).
-                // A fixed TTL of 20 seconds ensures a replay signature remains cached until 
+                // A fixed TTL of 20 seconds ensures a replay signature remains cached until
                 // its underlying timestamp expires completely.
                 let replay_ttl = 20;
                 let replay_key = format!("replay:sig:{}", signature_b64);
