@@ -81,32 +81,33 @@ Alice installs the DeezChatz app and taps "Sign In with Google."
 
 1. The app triggers the native Google Sign-In flow (via `expo-google-native-oauth`).
 2. Google returns an `idToken` — a JWT containing Alice's email, name, and profile picture.
-3. The app sends this `idToken` to the DeezChatz API: `POST /register/google/id_token`.
+3. The app sends this `idToken` and Alice's generated `iKey` to the DeezChatz API: `POST /register/google/id_token`.
 4. The server verifies the token against Google's JWKS (public key set).
 5. The server checks DynamoDB for an existing profile with Alice's email:
    - **Existing user?** → Reuse the existing `userId`.
    - **New user?** → Generate a new `userId` (UUID).
-6. The server stores Alice's Google claims (email, name, picture) in Redis with a 10-minute TTL, keyed by `reg:pending:{userId}`.
-7. The server returns the `userId` to the app.
+6. The server generates a random `state` session token (UUID v4) and stores Alice's pending claims and `iKey` in Redis with a 10-minute TTL, keyed by `reg:pending:{state}`.
+7. The server returns `{ status: "success", userId, state, email, name, picture }` to the app.
 
 ### Phase 2: "Prove you can encrypt." (Key Upload)
 
-Now the app generates cryptographic keys locally (using `expo-libsignal-dezire`):
+Now the app generates the rest of the cryptographic keys locally (using `expo-libsignal-dezire`):
 
-1. Generate an Identity Key pair, a Signed Pre-Key pair, a Signed Device Key pair, and a batch of One-Time Pre-Keys.
-2. VXEdDSA sign the Signed Pre-Key with the Identity Key → produces `preKeySign` + `preKeyVrf`.
-3. VXEdDSA sign the Signed Device Key with the Identity Key → produces `devKeySign` + `devKeyVrf`.
-4. Send everything to the API: `POST /register/device`.
-5. The server:
-   - Fetches Alice's pending claims from Redis.
-   - **Verifies both signatures + VRF outputs** (dual-key verification — if either fails, registration is rejected).
-   - Writes the Profile and Device items to DynamoDB in a single transaction.
+1. Generate a Signed Pre-Key pair, a Signed Device Key pair, and a batch of One-Time Pre-Keys.
+2. VXEdDSA sign the random `state` token with the Identity Key → produces `stateSignature` + `stateVrf`.
+3. VXEdDSA sign the Signed Pre-Key with the Identity Key → produces `preKeySign` + `preKeyVrf`.
+4. VXEdDSA sign the Signed Device Key with the Identity Key → produces `devKeySign` + `devKeyVrf`.
+5. Send everything to the API: `POST /register/device`.
+6. The server:
+   - Fetches Alice's pending registration from Redis using the `state` token.
+   - **Verifies all three signatures + VRF outputs** (state token, pre-key, and device key — if any fail, registration is rejected).
+   - Writes the Profile, Device, and lookup pointer items to DynamoDB in a single transaction.
    - Deletes the pending registration from Redis.
-6. Returns `{ userId, deviceId }`.
+7. Returns `{ status: "success", userId, deviceId }`.
 
 Alice is now registered and can send/receive encrypted messages.
 
-For the detailed sequence diagrams, see [Registration in Cryptographic Flows](cryptographic_flows.md#2-registration-dual-key-verification).
+For the detailed sequence diagrams, see [Registration in Cryptographic Flows](cryptographic_flows.md#2-registration-triple-key-verification).
 
 ---
 

@@ -69,22 +69,22 @@ src/
 │
 ├── handlers/
 │   ├── public/             # Handlers exposed on port 3000 (Client-facing)
-│   │   ├── auth.rs         # POST /register/google/id_token
+│   │   ├── google_oauth.rs # POST /register/google/id_token
 │   │   ├── bundle.rs       # POST /bundle/{id}, GET /bundle/sync/{id}
 │   │   └── device.rs       # POST /register/device, POST /register/device/fcm
 │   │
 │   └── private/            # Handlers exposed on port 3001 (Internal only)
-│       └── webhook.rs      # POST /offline_message (from RMQTT)
+│       └── offline_message.rs # POST /offline_message (from RMQTT)
 │
 ├── db/                     # DynamoDB and Redis operations
 │   ├── keys.rs             # Helper functions for generating partition/sort keys.
-│   ├── primary.rs          # Core DynamoDB CRUD (get_item, transact_write).
-│   └── temp.rs             # Redis operations (set_nx, get_json).
+│   ├── primary.rs          # Core DynamoDB CRUD (get_item, transact_write, pop_opk).
+│   └── temp.rs             # Redis operations (set_temp_json_nx, get_temp_json).
 │
 ├── models/                 # Structs mapping to DynamoDB items
 │   ├── profile.rs          # Profile item (keys, metadata).
 │   ├── device.rs           # Device item (FCM token).
-│   └── payload.rs          # Request/Response DTOs for handlers.
+│   └── temp_registration.rs# Temp registration item cached in Redis.
 │
 └── push/                   # Push notification abstractions
     ├── mod.rs              # PushProvider trait.

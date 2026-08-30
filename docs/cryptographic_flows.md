@@ -14,7 +14,7 @@ Before understanding the flows, it's important to know the keys involved. Each u
 
 | Key | Type | Purpose |
 | :--- | :--- | :--- |
-| **Identity Key (`iKey`)** | Curve25519 (33 bytes) | Long-term identity; signs all other keys |
+| **Identity Key (`iKey`)** | Curve25519 (33 bytes) | Long-term identity; signs all other keys and state tokens |
 | **Signed Pre-Key (`signedPreKey`)** | Curve25519 (33 bytes) | Medium-term key for X3DH; also used for API authentication |
 | **Signed Device Key (`signedDeviceKey`)** | Curve25519 (33 bytes) | Per-device key signed by the Identity Key |
 | **One-Time Pre-Keys (`opks`)** | Curve25519 (33 bytes each) | Ephemeral keys consumed during X3DH handshake |
@@ -57,9 +57,14 @@ Every VXEdDSA signature operation over a message `m` with Identity Key `iKey` pr
 
 ---
 
-## 2. Registration: Dual-Key Verification
+## 2. Registration: Triple-Key Verification
 
-During device registration (`POST /register/device`), the client uploads its newly generated keys. The server verifies **two** VXEdDSA signatures to ensure the client provably holds the private Identity Key. This happens after Phase 1 (OAuth), which is described in the [Concepts Guide](concepts.md#registration-flow).
+During device registration (`POST /register/device`), the client uploads its newly generated keys along with cryptographic proofs of possession. The server verifies **three** VXEdDSA signatures to ensure the client provably holds the private Identity Key:
+1. `stateSignature` + `stateVrf` over the random `state` session token.
+2. `preKeySign` + `preKeyVrf` over the `signedPreKey`.
+3. `devKeySign` + `devKeyVrf` over the `signedDeviceKey`.
+
+This happens after Phase 1 (OAuth), which is described in the [Concepts Guide](concepts.md#registration-flow).
 
 ### Sequence
 
@@ -70,48 +75,52 @@ sequenceDiagram
     participant R as Redis
     participant D as DynamoDB
 
-    Note over C: Generate keys locally:<br/>iKey, signedPreKey,<br/>signedDeviceKey, OPKs
+    Note over C: 1. Generate keys locally:<br/>iKey, signedPreKey,<br/>signedDeviceKey, OPKs
 
-    Note over C: VXEdDSA sign signedPreKey with iKey<br/>→ preKeySign (96 B) + preKeyVrf (32 B)
-    Note over C: VXEdDSA sign signedDeviceKey with iKey<br/>→ devKeySign (96 B) + devKeyVrf (32 B)
+    Note over C: 2. VXEdDSA sign state with iKey<br/>→ stateSignature (96 B) + stateVrf (32 B)
+    Note over C: 3. VXEdDSA sign signedPreKey with iKey<br/>→ preKeySign (96 B) + preKeyVrf (32 B)
+    Note over C: 4. VXEdDSA sign signedDeviceKey with iKey<br/>→ devKeySign (96 B) + devKeyVrf (32 B)
 
-    C->>+S: POST /register/device<br/>{userId, phone, iKey, signedPreKey, preKeySign,<br/>preKeyVrf, signedDeviceKey, devKeySign,<br/>devKeyVrf, opks, fcmToken}
+    C->>+S: POST /register/device<br/>{state, stateSignature, stateVrf, phone, signedPreKey,<br/>preKeySign, preKeyVrf, signedDeviceKey, devKeySign,<br/>devKeyVrf, opks, fcmToken}
 
-    S->>R: Fetch pending registration (userId)
-    R-->>S: {name, email, picture}
+    S->>R: Fetch pending registration (reg:pending:state)
+    R-->>S: {userId, iKey, name, email, picture, createdAt}
 
-    Note over S: Verify #1: preKeySign
-    Note over S: Verify #2: devKeySign
+    Note over S: Verify #1: stateSignature over state using iKey
+    Note over S: Verify #2: preKeySign over signedPreKey using iKey
+    Note over S: Verify #3: devKeySign over signedDeviceKey using iKey
     Note over S: (see flowchart below)
 
-    S->>D: TransactWriteItems<br/>[Profile (consolidated), Device]
+    S->>D: TransactWriteItems<br/>[Profile, Device, Email Pointer, Phone Pointer]
     D-->>S: Success
 
     S->>R: Delete pending registration key
-
     S-->>-C: {status: "success", userId, deviceId}
 ```
 
 ### Verification Flowchart
 
-If either signature verification fails, the entire registration request is rejected.
+If any signature or VRF verification fails, the entire registration request is rejected.
 
 ```mermaid
 flowchart TD
-    A["Receive registration request"] --> B["Decode iKey, signedPreKey,<br/>preKeySign, preKeyVrf"]
-    B --> C{"vxeddsa_verify(<br/>iKey, signedPreKey,<br/>preKeySign)"}
-    C -- "None (invalid)" --> ERR1["❌ 401: Invalid signature<br/>for signedPreKey"]
-    C -- "Some(vrf₁)" --> D{"vrf₁ == preKeyVrf?"}
-    D -- No --> ERR2["❌ 401: VRF mismatch<br/>for signedPreKey"]
-    D -- Yes --> E["Decode signedDeviceKey,<br/>devKeySign, devKeyVrf"]
-    E --> F{"vxeddsa_verify(<br/>iKey, signedDeviceKey,<br/>devKeySign)"}
-    F -- "None (invalid)" --> ERR3["❌ 401: Invalid signature<br/>for signedDeviceKey"]
-    F -- "Some(vrf₂)" --> G{"vrf₂ == devKeyVrf?"}
-    G -- No --> ERR4["❌ 401: VRF mismatch<br/>for signedDeviceKey"]
-    G -- Yes --> H["✅ Both keys verified<br/>Proceed to DynamoDB write"]
+    A["Receive registration request with state token"] --> B["Fetch TempRegistration from Redis via state token"]
+    B --> B1{"State token found?"}
+    B1 -- No --> ERR0["❌ 404: Pending registration not found or expired"]
+    B1 -- Yes --> C["Decode iKey, state, stateSignature, stateVrf"]
+    C --> D{"vxeddsa_verify(<br/>iKey, state,<br/>stateSignature)"}
+    D -- "None (invalid)" --> ERR1["❌ 401: Invalid signature for state"]
+    D -- "Some(vrf₁)" --> E{"vrf₁ == stateVrf?"}
+    E -- No --> ERR2["❌ 401: VRF mismatch for state"]
+    E -- Yes --> F{"verify_signed_signature(<br/>iKey, signedPreKey,<br/>preKeySign, preKeyVrf)"}
+    F -- Failed --> ERR3["❌ 401: Invalid signature/VRF for signedPreKey"]
+    F -- OK --> G{"verify_signed_signature(<br/>iKey, signedDeviceKey,<br/>devKeySign, devKeyVrf)"}
+    G -- Failed --> ERR4["❌ 401: Invalid signature/VRF for signedDeviceKey"]
+    G -- OK --> H["✅ All proofs verified<br/>Proceed to DynamoDB TransactWriteItems"]
 
     style A fill:#3498db,color:#fff
     style H fill:#2ecc71,color:#fff
+    style ERR0 fill:#e74c3c,color:#fff
     style ERR1 fill:#e74c3c,color:#fff
     style ERR2 fill:#e74c3c,color:#fff
     style ERR3 fill:#e74c3c,color:#fff
@@ -122,79 +131,79 @@ flowchart TD
 
 | Table Item | Fields Stored | Fields **NOT** Stored |
 | :--- | :--- | :--- |
-| **Profile** | `iKey`, `signedPreKey`, `signature` (preKeySign), `opks`, `deviceId`, `signedDeviceKey`, `fcmToken` | `preKeyVrf`, `devKeySign`, `devKeyVrf` |
-| **Device** | `signedDeviceKey`, `fcmToken` | VRF outputs |
+| **Profile** | `iKey`, `signedPreKey`, `signature` (preKeySign), `opks`, `deviceId`, `signedDeviceKey`, `fcmToken`, `phone`, `email`, `name`, `picture` | `stateVrf`, `preKeyVrf`, `devKeySign`, `devKeyVrf` |
+| **Device** | `signedDeviceKey`, `fcmToken`, `createdAt`, `updatedAt` | VRF outputs |
+| **Email Pointer** | `pk: EMAIL#{email}`, `sk: PTR`, `userId` | None |
+| **Phone Pointer** | `pk: PHONE#{phone}`, `sk: PTR`, `userId` | None |
 
-> VRF outputs are verified at registration time and discarded. They serve as proof-of-possession but are not needed post-verification.
+> VRF outputs are verified at registration time and discarded. They serve as cryptographic proofs-of-possession but are not stored post-verification.
 
 ---
 
 ## 3. Stateless Signature Authentication
 
-Authenticated endpoints on the **Public API** (e.g., retrieving a pre-key bundle or updating an FCM token) use VXEdDSA signature authentication. For a conceptual overview of why we don't use JWTs, see [Authentication: Why Not JWTs?](concepts.md#authentication-why-not-jwts).
+Authenticated endpoints on the **Public API** (e.g., retrieving a pre-key bundle, syncing contact bundles, or updating an FCM token) use VXEdDSA signature authentication via Axum's `AuthenticatedUser` middleware extractor.
 
 ### Sequence
 
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant S as Server
+    participant S as Server (Middleware)
     participant R as Redis
     participant D as DynamoDB
+    participant H as Route Handler
 
-    Note over C: Construct payload:<br/>message = userId + timestamp
+    Note over C: Construct message payload:<br/>message = userId + timestamp
 
     Note over C: VXEdDSA sign message<br/>with signedPreKey<br/>→ signature (96 B) + vrf (32 B)
 
     C->>+S: Request with headers:<br/>X-User-Id · X-Timestamp<br/>X-Signature · X-Vrf
 
-    Note over S: 1. Validate timestamp<br/>(±10 sec drift allowed)
+    Note over S: 1. Validate X-User-Id is UUID v4
+    Note over S: 2. Validate timestamp drift<br/>(|now - ts| <= 10 sec)
 
-    alt Request is for FCM update (/register/device/fcm)
-        S->>R: Check and set signature key (10s TTL)
-        alt Signature exists
-            S-->>C: ❌ 401 Replay attack detected
-        else Signature unique
-            Note over S: Store signature in Redis
-        end
+    S->>D: Fetch Profile (pk: USER#userId, sk: PROFILE)
+    D-->>S: Profile item (contains signedPreKey)
+
+    Note over S: 3. Reconstruct payload: userId + timestamp
+    Note over S: 4. vxeddsa_verify(signedPreKey, message, signature) → output_vrf
+    Note over S: 5. Assert output_vrf == X-Vrf
+
+    S->>R: SET replay:sig:<X-Signature> "1" NX EX 20
+    alt Signature already exists in Redis
+        R-->>S: false (Key exists)
+        S-->>C: ❌ 401 Replay attack detected
+    else Signature unique
+        R-->>S: true (Key stored)
+        S->>+H: Pass AuthenticatedUser to handler
+        H-->>-C: ✅ 200 OK Response
     end
-
-    S->>D: Fetch Profile (signedPreKey)
-    D-->>S: Profile item
-
-    Note over S: 2. Reconstruct message:<br/>userId + timestamp
-
-    Note over S: 3. vxeddsa_verify(<br/>signedPreKey, message,<br/>signature) → output_vrf
-
-    Note over S: 4. Assert output_vrf<br/>== X-Vrf header
-
-    S-->>-C: ✅ Authenticated / ❌ 401
 ```
 
 ### Verification Flowchart
 
 ```mermaid
 flowchart TD
-    A["Incoming request with<br/>X-User-Id, X-Timestamp,<br/>X-Signature, X-Vrf"] --> B{"Timestamp within<br/>±10 sec of server time?"}
-    B -- No --> ERR1["❌ 401: Timestamp expired<br/>or too far in the future"]
-    B -- Yes --> B2{"Path is FCM update?"}
-    B2 -- Yes --> B3{"Signature exists in Redis?"}
-    B3 -- Yes --> ERR5["❌ 401: Replay attack detected"]
-    B3 -- No --> B4["Store signature in Redis<br/>with 10s TTL"]
-    B4 --> C["Fetch Profile from DynamoDB<br/>using X-User-Id"]
-    B2 -- No --> C
-    C --> D{"Profile found?"}
+    A["Incoming request with<br/>X-User-Id, X-Timestamp,<br/>X-Signature, X-Vrf"] --> B1{"X-User-Id is valid<br/>UUID v4?"}
+    B1 -- No --> ERR0["❌ 401: Invalid user ID format"]
+    B1 -- Yes --> B2{"Timestamp within<br/>±10 sec of server time?"}
+    B2 -- No --> ERR1["❌ 401: Timestamp expired<br/>or too far in the future"]
+    B2 -- Yes --> C["Fetch Profile from DynamoDB<br/>using USER#userId"]
+    C --> D{"Profile found & has<br/>signedPreKey?"}
     D -- No --> ERR2["❌ 401: User not found"]
-    D -- Yes --> E["Extract signedPreKey<br/>from Profile"]
-    E --> F["Reconstruct message:<br/>userId + timestamp"]
-    F --> G{"vxeddsa_verify(<br/>signedPreKey,<br/>message, signature)"}
-    G -- "None (invalid)" --> ERR3["❌ 401: Invalid signature"]
-    G -- "Some(output_vrf)" --> H{"output_vrf == X-Vrf?"}
-    H -- No --> ERR4["❌ 401: VRF mismatch"]
-    H -- Yes --> I["✅ Authenticated<br/>Proceed to handler"]
+    D -- Yes --> E["Reconstruct message:<br/>userId + timestamp"]
+    E --> F{"vxeddsa_verify(<br/>signedPreKey,<br/>message, signature)"}
+    F -- "None (invalid)" --> ERR3["❌ 401: Invalid signature"]
+    F -- "Some(output_vrf)" --> G{"output_vrf == X-Vrf?"}
+    G -- No --> ERR4["❌ 401: VRF mismatch"]
+    G -- Yes --> H{"Redis SET NX EX 20<br/>replay:sig:X-Signature"}
+    H -- "Already Exists" --> ERR5["❌ 401: Replay attack detected"]
+    H -- "Saved (New)" --> I["✅ Authenticated<br/>Proceed to handler"]
 
     style A fill:#3498db,color:#fff
     style I fill:#2ecc71,color:#fff
+    style ERR0 fill:#e74c3c,color:#fff
     style ERR1 fill:#e74c3c,color:#fff
     style ERR2 fill:#e74c3c,color:#fff
     style ERR3 fill:#e74c3c,color:#fff
@@ -206,17 +215,19 @@ flowchart TD
 
 | Property | Mechanism |
 | :--- | :--- |
-| **Replay protection** | Timestamp must be within ±10 seconds of server time. Additionally, `/register/device/fcm` validates signature uniqueness in a 10s TTL Redis cache. |
-| **Identity binding** | Signature is over `userId + timestamp`, tying the request to a specific user |
-| **Key binding** | Verified against the user's `signedPreKey` stored at registration |
-| **VRF integrity** | VRF output must match, proving the signer holds the private key corresponding to `signedPreKey` |
-| **Stateless** | No sessions, cookies, or JWTs; every request is independently verifiable |
+| **Strict Format Enforcement** | `X-User-Id` must parse as a valid UUID v4. |
+| **Drift Window** | `X-Timestamp` must be within ±10 seconds of current server UTC time. |
+| **Replay Protection** | Valid signatures are cached in Redis (`replay:sig:<sig>`) with a 20-second TTL (`SET NX EX 20`), which completely outlasts the ±10s drift window. Replays of identical signatures fail immediately. |
+| **Identity Binding** | Signature is over `userId + timestamp`, cryptographically tying the request to the specified user identity. |
+| **Key Binding** | Verified against the user's `signedPreKey` stored at registration. |
+| **VRF Integrity** | VRF output must match, proving the signer possesses the private key corresponding to `signedPreKey`. |
+| **Stateless** | No server sessions, cookies, or JWTs; every request is independently verifiable. |
 
 ---
 
 ## 4. X3DH Session Establishment
 
-When one user wants to message another for the first time, they must perform an X3DH handshake. The server simply serves the recipient's pre-key bundle; the actual key exchange happens entirely client-side.
+When one user wants to message another for the first time, they must perform an X3DH handshake. The server serves the recipient's pre-key bundle; the actual key exchange happens entirely client-side.
 
 ### Sequence
 
@@ -242,11 +253,11 @@ sequenceDiagram
         alt Success
             Note over S: OPK popped successfully
         else Conflict (Concurrent pop)
-            Note over S: Retry loop
+            Note over S: Retry loop with exponential back-off (50ms, 100ms, 200ms, 400ms)
         end
     end
 
-    S-->>-A: Pre-Key Bundle:<br/>{userId, deviceId, identityKey,<br/>signedPreKey, signature, opk}
+    S-->>-A: Pre-Key Bundle:<br/>{userId, deviceId, identityKey,<br/>signedPreKey, signature, phone, picture, opk}
 
     Note over A: Verify signature of<br/>signedPreKey using iKey
 
@@ -261,32 +272,35 @@ sequenceDiagram
 
 | Field | Source |
 | :--- | :--- |
-| `userId` | Profile item (`pk` strip prefix) |
-| `deviceId` | Profile item |
+| `userId` | Profile item (`pk` stripped of `USER#` prefix) |
+| `deviceId` | Profile item (`deviceId`) |
 | `identityKey` | Profile item (`iKey`) |
 | `signedPreKey` | Profile item (`signedPreKey`) |
-| `signature` | Profile item (VXEdDSA signature of `signedPreKey`) |
-| `opk` | One OPK consumed from the `opks` list (removed after retrieval) |
+| `signature` | Profile item (`signature` / VXEdDSA signature of `signedPreKey`) |
+| `phone` | Profile item (`phone`, optional) |
+| `picture` | Profile item (`picture`, optional) |
+| `opk` | One OPK atomically popped from the `opks` array (omitted if exhausted) |
 
 ---
 
 ## 5. VXEdDSA Verification Functions
 
-The server exposes two internal verification functions in `src/crypto.rs` to support these flows:
+The server exposes internal verification helpers in `src/crypto.rs` to support these flows:
 
 ### `verify_signed_signature(iKey, target_key, signature, vrf, field_name)`
 
-**Used during**: Registration (called twice — once for pre-key, once for device key)
+**Used during**: Registration (called for `signedPreKey` and `signedDeviceKey`)
 
-1. Decodes all Base64 inputs and validates lengths.
-2. Calls `vxeddsa_verify(iKey, target_key, signature)` from the `libsignal-dezire` crate.
+1. Decodes all Base64 inputs and validates byte lengths (33-byte keys, 96-byte signatures, 32-byte VRF outputs).
+2. Calls `vxeddsa_verify(iKey, target_key, signature)` from `libsignal-dezire`.
 3. If verification succeeds, asserts the returned VRF matches the expected `vrf`.
-4. Returns `Err(Unauthorized)` on signature failure or VRF mismatch.
+4. Returns `Err(AppError::Unauthorized)` on signature failure or VRF mismatch.
 
 ### `verify_signature(public_key, message, signature)`
 
-**Used during**: Stateless authentication (per-request)
+**Used during**: Stateless per-request authentication and `state` token verification in registration
 
-1. Calls `vxeddsa_verify(public_key, message, signature)` from the `libsignal-dezire` crate.
-2. Returns the VRF output on success (caller checks the match against `X-Vrf`).
-3. Returns `Err(Unauthorized)` on signature failure.
+1. Calls `vxeddsa_verify(public_key, message, signature)` from `libsignal-dezire`.
+2. Returns the computed 32-byte VRF output on success.
+3. The caller asserts that the returned VRF equals the expected VRF.
+4. Returns `Err(AppError::Unauthorized)` on signature failure.
