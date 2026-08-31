@@ -115,6 +115,8 @@ All entities are stored in a single DynamoDB table using Partition Key (`pk`) an
 | **Device** | `USER#{userId}` | `DEVICE#{deviceId}` | `signedDeviceKey`, `fcmToken`, `createdAt`, `updatedAt` |
 | **Email Pointer** | `EMAIL#{email}` | `PTR` | `userId` |
 | **Phone Pointer** | `PHONE#{phone}` | `PTR` | `userId` |
+| **User Report** | `REPORTER#{reporterId}` | `REPORTED#{reportedId}#{timestamp}` | `reporterId`, `reportedId`, `reason`, `messages`, `createdAt` |
+| **Offline Message** | `USER#{recipientId}` | `OFFLINE_MSG#{timestamp}#{uuid}` | `senderId`, `senderDeviceId`, `topic`, `payload`, `ttl` |
 
 ### Base Table Lookups (Zero-GSI)
 
@@ -129,8 +131,8 @@ This allows finding a user's `userId` and profile by their email or phone number
 
 | Key Pattern | TTL | Purpose |
 |------------|-----|---------|
-| `reg:pending:{userId}` | 10 min | Stores Google OAuth claims during the registration handoff (Phase 1 → Phase 2) |
-| `replay:sig:{signature_b64}` | 10 sec | Prevents signature replay on the FCM token update endpoint |
+| `reg:pending:{state_token}` | 10 min | Stores Google OAuth claims and `iKey` during registration handoff (Phase 1 → Phase 2) |
+| `replay:sig:{signature_b64}` | 20 sec | Prevents signature replay attacks across all authenticated endpoints |
 
 ---
 

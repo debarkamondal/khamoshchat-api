@@ -357,7 +357,97 @@ Updates the Firebase Cloud Messaging push token associated with a registered dev
 
 ---
 
-## 4. Private API (Port 3001)
+## 4. User Management
+
+---
+
+### Delete Account
+
+Permanently deletes the caller's account, removing their user profile, registered devices, phone and email pointer lookups, and temporary registration records.
+
+- **Endpoint**: `DELETE /users/me`
+- **Authentication**: Stateless Signature Authentication (`X-User-Id`, `X-Timestamp`, `X-Signature`, `X-Vrf`).
+
+- **Example Request**:
+  ```bash
+  curl -X DELETE http://localhost:3000/users/me \
+       -H "X-User-Id: 3fa85f64-5717-4562-b3fc-2c963f66afa6" \
+       -H "X-Timestamp: 1700000000000" \
+       -H "X-Signature: c2lnbmF0dXJl..." \
+       -H "X-Vrf: dnJmb3V0cHV0..."
+  ```
+
+- **Responses**:
+  - `200 OK`:
+    ```json
+    {
+      "status": "success",
+      "message": "Account deleted"
+    }
+    ```
+  - `401 Unauthorized`: Invalid signature, timestamp drift (>10s), or signature replay attack.
+  - `500 Internal Server Error`: DynamoDB transaction or deletion failure.
+
+---
+
+### Report User
+
+Submits an abuse, harassment, or spam report against another user, optionally including message transcripts for moderation.
+
+- **Endpoint**: `POST /users/report`
+- **Authentication**: Stateless Signature Authentication (`X-User-Id`, `X-Timestamp`, `X-Signature`, `X-Vrf`).
+- **Request Headers**: `Content-Type: application/json`
+- **Request Body**:
+  ```json
+  {
+    "reportedUserId": "7b8f9e0a-1234-4567-89ab-cdef01234567",
+    "reason": "Harassment / Spam / Abuse",
+    "messages": [
+      {
+        "id": "msg_01HZX87",
+        "content": "Abusive text message content",
+        "sender_id": "7b8f9e0a-1234-4567-89ab-cdef01234567",
+        "created_at": 1756548239000
+      }
+    ]
+  }
+  ```
+  | Field | Type | Required | Description |
+  | :--- | :--- | :--- | :--- |
+  | `reportedUserId` | `string` | Yes | UUID v4 of the user being reported. Cannot be the caller's own ID. |
+  | `reason` | `string` | Yes | Non-empty description or category of the abuse. |
+  | `messages` | `array` | No | Optional array of reported message objects for moderation. |
+
+- **Example Request**:
+  ```bash
+  curl -X POST http://localhost:3000/users/report \
+       -H "X-User-Id: 3fa85f64-5717-4562-b3fc-2c963f66afa6" \
+       -H "X-Timestamp: 1700000000000" \
+       -H "X-Signature: c2lnbmF0dXJl..." \
+       -H "X-Vrf: dnJmb3V0cHV0..." \
+       -H "Content-Type: application/json" \
+       -d '{
+         "reportedUserId": "7b8f9e0a-1234-4567-89ab-cdef01234567",
+         "reason": "Harassment / Spam",
+         "messages": []
+       }'
+  ```
+
+- **Responses**:
+  - `200 OK`:
+    ```json
+    {
+      "status": "success",
+      "reportId": "rep_c8a1e8a9-4091-4cf1-8c43-d34e9e03fba8"
+    }
+    ```
+  - `400 Bad Request`: Invalid `reportedUserId` UUID v4 format, attempting to report oneself, or empty `reason`.
+  - `401 Unauthorized`: Invalid signature, timestamp drift (>10s), or signature replay attack.
+  - `500 Internal Server Error`: DynamoDB write failure.
+
+---
+
+## 5. Private API (Port 3001)
 
 > **⚠️ Security Notice**: Port 3001 is for **internal backend communication only** (between the RMQTT broker and this API). It must be firewalled and never exposed to the public internet.
 

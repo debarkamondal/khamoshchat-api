@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5] - 2026-08-31
+
+### Added
+- **User Account Deletion (`DELETE /users/me`)**: Authenticated endpoint allowing users to permanently delete their account, cleaning up user profiles, registered devices, phone and email pointer lookups, and pending registration records.
+- **User Abuse Reporting (`POST /users/report`)**: Authenticated endpoint to submit abuse/harassment reports with optional message transcripts for moderation, recorded in DynamoDB under `REPORTER#{reporterId}` and `REPORTED#{reportedId}` partitions.
+- **State-Based Device Registration Flow**: Temporary registration sessions are now bound to cryptographic random state tokens stored in Redis (`reg:pending:{state_token}`) with 10-minute TTL. Device registration requires VXEdDSA signature and VRF proofs over the state token.
+
+### Architecture & Refactoring
+- **Modular Data Models & DB Layer**: Split database logic and models into dedicated domain modules (`src/db/user.rs`, `src/db/device.rs`, `src/db/message.rs`, `src/db/lib.rs`, `src/models/api/`, `src/models/db/`).
+- **Separation of Concerns**: Cleanly separated public API transfer models from DynamoDB persistence entities.
+
+### Documentation
+- Updated `docs/api.md` with complete documentation for `/users/me` and `/users/report`.
+- Updated `docs/development.md` and `docs/architecture.md` with current project layout and data models.
+
+---
+
 ## [0.4.2] - 2026-08-28
 
 ### Performance & Container Optimization
