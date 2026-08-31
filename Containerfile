@@ -33,6 +33,7 @@ LABEL org.opencontainers.image.description="DeezChatz API server"
 # Install runtime dependencies
 RUN apk add --no-cache \
     ca-certificates \
+    gcompat \
     libssl3
 
 # Non-root user (UID/GID 1000 to match host rocky user for keep-id)

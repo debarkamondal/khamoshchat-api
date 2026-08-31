@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Modular Data Models & DB Layer**: Split database logic and models into dedicated domain modules (`src/db/user.rs`, `src/db/device.rs`, `src/db/message.rs`, `src/db/lib.rs`, `src/models/api/`, `src/models/db/`).
 - **Separation of Concerns**: Cleanly separated public API transfer models from DynamoDB persistence entities.
 
+### Fixed
+- **IAM Roles Anywhere Compatibility**: Added `gcompat` to runtime container image dependencies to support glibc-linked credential helpers like `aws_signing_helper` on Alpine Linux.
+
 ### Documentation
 - Updated `docs/api.md` with complete documentation for `/users/me` and `/users/report`.
 - Updated `docs/development.md` and `docs/architecture.md` with current project layout and data models.
