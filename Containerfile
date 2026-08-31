@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Build Stage
 FROM rust:1.98.0-alpine3.24 AS builder
 
@@ -14,14 +15,16 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
-# Cache dependencies - copy manifests first
+# Copy dependency manifests and source files
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo 'fn main() {}' > src/main.rs
-RUN cargo build --release && rm -rf src
+COPY src ./src
 
-# Copy the real source and rebuild
-COPY . .
-RUN touch src/main.rs && cargo build --release
+# Build with BuildKit cache mounts for cargo registry, git, and target artifacts
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo build --release && \
+    cp /app/target/release/deezchatz-api /app/deezchatz-api
 
 # Runtime Stage
 FROM alpine:3.24.1
@@ -42,7 +45,7 @@ RUN addgroup -g 1000 rocky && adduser -u 1000 -G rocky -D rocky
 WORKDIR /app
 
 # Copy the binary from the builder stage with proper ownership
-COPY --from=builder --chown=rocky:rocky /app/target/release/deezchatz-api /app/deezchatz-api
+COPY --from=builder --chown=rocky:rocky /app/deezchatz-api /app/deezchatz-api
 
 USER rocky
 
