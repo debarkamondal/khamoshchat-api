@@ -1,6 +1,6 @@
 use aws_sdk_dynamodb::types::{AttributeValue, Delete, Put, TransactWriteItem};
 use axum::{extract::State, Json};
-use serde::Deserialize;
+
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -12,36 +12,22 @@ use crate::{
             device_sk, email_lookup_pk, lookup_sk, pending_reg_key, phone_lookup_pk, profile_sk,
             user_pk,
         },
-        primary::transact_write_items,
+        lib::transact_write_items,
         temp::{delete_temp_key, get_temp_json},
     },
     error::AppError,
-    models::temp_registration::TempRegistration,
+    models::db::temp_registration::TempRegistration,
     state::AppState,
 };
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RegisterDeviceRequest {
-    pub state: String,
-    pub state_signature: String,
-    pub state_vrf: String,
-    pub phone: String,
-    pub signed_pre_key: String,
-    pub pre_key_sign: String,
-    pub pre_key_vrf: String,
-    #[serde(default)]
-    pub opks: Vec<String>,
-    pub signed_device_key: String,
-    pub dev_key_sign: String,
-    pub dev_key_vrf: String,
-    pub fcm_token: Option<String>,
-}
+use crate::models::api::device::{
+    RegisterDeviceReq, RegisterDeviceResp, UpdateFcmTokenReq, UpdateFcmTokenResp,
+};
 
 pub async fn register_device(
     State(state): State<AppState>,
-    Json(req): Json<RegisterDeviceRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
+    Json(req): Json<RegisterDeviceReq>,
+) -> Result<Json<RegisterDeviceResp>, AppError> {
     if req.phone.trim().is_empty() {
         return Err(AppError::BadRequest("Phone number is required".to_string()));
     }
@@ -110,7 +96,7 @@ pub async fn register_device(
 
     // 3. Check for existing profile to preserve device_id / createdAt if re-registering
     let pk = user_pk(&pending_data.user_id);
-    let existing_profile_opt = crate::db::primary::get_item(&state, &pk, profile_sk()).await?;
+    let existing_profile_opt = crate::db::lib::get_item(&state, &pk, profile_sk()).await?;
 
     let (device_id, created_at, existing_picture, old_phone) =
         if let Some(ref existing) = existing_profile_opt {
@@ -345,25 +331,20 @@ pub async fn register_device(
     tracing::info!(user_id = %pending_data.user_id, device_id = %device_id, "Device registered successfully");
 
     // 5. Response
-    Ok(Json(serde_json::json!({
-        "status": "success",
-        "userId": pending_data.user_id,
-        "deviceId": device_id,
-    })))
+    Ok(Json(RegisterDeviceResp {
+        status: "success".to_string(),
+        user_id: pending_data.user_id,
+        device_id,
+    }))
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateFcmTokenRequest {
-    pub device_id: String,
-    pub fcm_token: String,
-}
+
 
 pub async fn update_fcm_token(
     State(state): State<AppState>,
     auth_user: crate::auth::signature::AuthenticatedUser,
-    Json(req): Json<UpdateFcmTokenRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
+    Json(req): Json<UpdateFcmTokenReq>,
+) -> Result<Json<UpdateFcmTokenResp>, AppError> {
     uuid::Uuid::parse_str(&req.device_id)
         .map_err(|_| AppError::BadRequest("Invalid deviceId format: must be UUID".to_string()))?;
 
@@ -371,12 +352,12 @@ pub async fn update_fcm_token(
     let sk = device_sk(&req.device_id);
 
     // Update FCM token in DynamoDB
-    crate::db::primary::update_item_fcm(&state, &pk, &sk, &req.fcm_token).await?;
+    crate::db::device::update_item_fcm(&state, &pk, &sk, &req.fcm_token).await?;
 
     tracing::info!(user_id = %auth_user.user_id, device_id = %req.device_id, "FCM token updated successfully");
 
-    Ok(Json(serde_json::json!({
-        "status": "success",
-        "message": "FCM token updated",
-    })))
+    Ok(Json(UpdateFcmTokenResp {
+        status: "success".to_string(),
+        message: "FCM token updated".to_string(),
+    }))
 }

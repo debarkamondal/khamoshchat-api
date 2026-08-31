@@ -1,40 +1,27 @@
 use axum::{extract::State, Json};
-use serde::Deserialize;
+
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::{
     db::{
         keys::{email_lookup_pk, lookup_sk, pending_reg_key},
-        primary::get_item,
+        lib::get_item,
         temp::set_temp_json,
     },
     error::AppError,
-    models::temp_registration::TempRegistration,
+    models::db::temp_registration::TempRegistration,
     state::AppState,
 };
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GoogleIdTokenRequest {
-    pub id_token: String,
-    pub i_key: String,
-}
-
-#[derive(Deserialize)]
-struct GoogleIdTokenClaims {
-    email: String,
-    email_verified: bool,
-    picture: Option<String>,
-    name: Option<String>,
-}
+use crate::models::api::auth::{GoogleIdTokenClaims, GoogleIdTokenReq, GoogleIdTokenResp};
 
 const OAUTH_TTL_SECS: u64 = 600; // 10 minutes
 
 pub async fn verify_id_token(
     State(state): State<AppState>,
-    Json(req): Json<GoogleIdTokenRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
+    Json(req): Json<GoogleIdTokenReq>,
+) -> Result<Json<GoogleIdTokenResp>, AppError> {
     // ── 1. JWT Verification (Google id_token) ──
     let mut jwks = None;
     {
@@ -173,12 +160,12 @@ pub async fn verify_id_token(
 
     tracing::info!(user_id = %user_id, email = %claims.email, "Google ID token verified and pending registration cached");
 
-    Ok(Json(serde_json::json!({
-        "status": "success",
-        "userId": user_id,
-        "state": state_token,
-        "email": claims.email,
-        "name": claims.name,
-        "picture": claims.picture,
-    })))
+    Ok(Json(GoogleIdTokenResp {
+        status: "success".to_string(),
+        user_id,
+        state: state_token,
+        email: claims.email,
+        name: claims.name,
+        picture: claims.picture,
+    }))
 }

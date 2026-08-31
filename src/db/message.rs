@@ -1,0 +1,65 @@
+use crate::{
+    error::AppError,
+    state::AppState,
+};
+use aws_sdk_dynamodb::types::AttributeValue;
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
+
+pub async fn put_offline_message(
+    state: &AppState,
+    recipient_id: &str,
+    sender_id: &str,
+    sender_device_id: &str,
+    topic: &str,
+    payload: &str,
+) -> Result<(), AppError> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let now_ms = now.as_millis() as u64;
+    let ttl_secs = now.as_secs() + (30 * 24 * 60 * 60); // 30 days
+
+    let pk = format!("USER#{}", recipient_id);
+    let sk = format!("OFFLINE_MSG#{}#{}", now_ms, Uuid::new_v4());
+
+    let mut item = HashMap::new();
+    item.insert("pk".to_string(), AttributeValue::S(pk));
+    item.insert("sk".to_string(), AttributeValue::S(sk));
+    item.insert(
+        "senderId".to_string(),
+        AttributeValue::S(sender_id.to_string()),
+    );
+    item.insert(
+        "senderDeviceId".to_string(),
+        AttributeValue::S(sender_device_id.to_string()),
+    );
+    item.insert("topic".to_string(), AttributeValue::S(topic.to_string()));
+    item.insert(
+        "payload".to_string(),
+        AttributeValue::S(payload.to_string()),
+    );
+    item.insert(
+        "createdAt".to_string(),
+        AttributeValue::N(now_ms.to_string()),
+    );
+    item.insert("ttl".to_string(), AttributeValue::N(ttl_secs.to_string()));
+
+    state
+        .dynamo
+        .put_item()
+        .table_name(&state.primary_table)
+        .set_item(Some(item))
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                "Failed to persist offline message: {}",
+                aws_sdk_dynamodb::error::DisplayErrorContext(&e)
+            );
+            AppError::Internal("Failed to store offline message".into())
+        })?;
+
+    Ok(())
+}

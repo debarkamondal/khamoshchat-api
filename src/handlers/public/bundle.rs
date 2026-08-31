@@ -2,55 +2,26 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use serde::Serialize;
+
 
 use crate::{
     auth::signature::AuthenticatedUser,
     db::{
         keys::{profile_sk, user_pk},
-        primary::{get_item, pop_opk, resolve_user_by_identifier},
+        lib::get_item, device::pop_opk, user::resolve_user_by_identifier,
     },
     error::AppError,
-    models::profile::Profile,
+    models::db::profile::Profile,
     state::AppState,
 };
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Opk {
-    id: usize,
-    key: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PreKeyBundle {
-    pub user_id: String,
-    pub device_id: String,
-    pub identity_key: String,
-    pub spk_id: u32,
-    pub signed_pre_key: String,
-    pub signature: String,
-    pub phone: Option<String>,
-    pub picture: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub opk: Option<Opk>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncBundle {
-    pub user_id: String,
-    pub identity_key: String,
-    pub picture: Option<String>,
-    pub display_name: Option<String>,
-}
+use crate::models::api::bundle::{Opk, PreKeyBundleResp, SyncBundleResp};
 
 pub async fn get_bundle(
     State(state): State<AppState>,
     Path(identifier): Path<String>,
     _auth_user: AuthenticatedUser, // Requires valid signature
-) -> Result<Json<PreKeyBundle>, AppError> {
+) -> Result<Json<PreKeyBundleResp>, AppError> {
     if identifier.trim().is_empty() {
         return Err(AppError::BadRequest("Missing identifier".to_string()));
     }
@@ -143,7 +114,7 @@ pub async fn get_bundle(
             }
         }
 
-        return Ok(Json(PreKeyBundle {
+        return Ok(Json(PreKeyBundleResp {
             user_id,
             device_id,
             identity_key,
@@ -161,7 +132,7 @@ pub async fn get_sync_bundle(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
     _auth_user: AuthenticatedUser,
-) -> Result<Json<SyncBundle>, AppError> {
+) -> Result<Json<SyncBundleResp>, AppError> {
     if user_id.trim().is_empty() {
         return Err(AppError::BadRequest("Missing userId".to_string()));
     }
@@ -191,7 +162,7 @@ pub async fn get_sync_bundle(
         .identity_key
         .ok_or_else(|| AppError::Internal("Database error: missing identity key".to_string()))?;
 
-    Ok(Json(SyncBundle {
+    Ok(Json(SyncBundleResp {
         user_id: resolved_user_id,
         identity_key,
         picture: profile.picture,
@@ -205,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_prekey_bundle_serialization() {
-        let bundle = PreKeyBundle {
+        let bundle = PreKeyBundleResp {
             user_id: "test-user-id".to_string(),
             device_id: "test-device-id".to_string(),
             identity_key: "ik-base64".to_string(),
@@ -220,7 +191,7 @@ mod tests {
             }),
         };
 
-        let json = serde_json::to_string(&bundle).expect("should serialize PreKeyBundle");
+        let json = serde_json::to_string(&bundle).expect("should serialize PreKeyBundleResp");
         let v: serde_json::Value = serde_json::from_str(&json).expect("should parse JSON");
 
         assert_eq!(v["spkId"], 1);

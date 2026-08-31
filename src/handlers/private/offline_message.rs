@@ -1,6 +1,6 @@
 use axum::{body::Bytes, extract::State, http::StatusCode, response::IntoResponse};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+
 use std::sync::LazyLock;
 
 static TOPIC_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -13,216 +13,19 @@ static TOPIC_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 use crate::{
     db::{
         keys::device_sk,
-        primary::{clear_device_fcm_token, get_item, put_offline_message},
+        device::clear_device_fcm_token, lib::get_item, message::put_offline_message,
     },
     push::{provider::PushError, WakeUpPayload},
     state::AppState,
 };
+use crate::models::api::webhook::WebhookPayloadReq;
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct SubscriptionOptions {
-    pub qos: u8,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
-pub enum WebhookPayload {
-    SessionCreated {
-        node: i64,
-        ipaddress: String,
-        clientid: String,
-        username: String,
-        created_at: i64,
-        time: String,
-    },
-    SessionTerminated {
-        node: i64,
-        ipaddress: String,
-        clientid: String,
-        username: String,
-        reason: String,
-        time: String,
-    },
-    SessionSubscribed {
-        node: i64,
-        ipaddress: String,
-        clientid: String,
-        username: String,
-        topic: String,
-        opts: SubscriptionOptions,
-        time: String,
-    },
-    SessionUnsubscribed {
-        node: i64,
-        ipaddress: String,
-        clientid: String,
-        username: String,
-        topic: String,
-        time: String,
-    },
-    ClientConnect {
-        node: i64,
-        ipaddress: String,
-        clientid: String,
-        username: String,
-        keepalive: i64,
-        proto_ver: u8,
-        clean_session: Option<bool>,
-        clean_start: Option<bool>,
-        time: String,
-    },
-    ClientConnack {
-        node: i64,
-        ipaddress: String,
-        clientid: String,
-        username: String,
-        keepalive: i64,
-        proto_ver: u8,
-        clean_session: Option<bool>,
-        clean_start: Option<bool>,
-        conn_ack: String,
-        time: String,
-    },
-    ClientConnected {
-        node: i64,
-        ipaddress: String,
-        clientid: String,
-        username: String,
-        keepalive: i64,
-        proto_ver: u8,
-        clean_session: Option<bool>,
-        clean_start: Option<bool>,
-        connected_at: i64,
-        session_present: bool,
-        user_properties: Option<serde_json::Value>,
-        time: String,
-    },
-    ClientDisconnected {
-        node: i64,
-        ipaddress: String,
-        clientid: String,
-        username: String,
-        disconnected_at: i64,
-        reason: String,
-        time: String,
-    },
-    ClientSubscribe {
-        node: i64,
-        ipaddress: String,
-        clientid: String,
-        username: String,
-        topic: String,
-        opts: SubscriptionOptions,
-        time: String,
-    },
-    ClientUnsubscribe {
-        node: i64,
-        ipaddress: String,
-        clientid: String,
-        username: String,
-        topic: String,
-        time: String,
-    },
-    MessagePublish {
-        from_node: Option<i64>,
-        from_ipaddress: Option<String>,
-        from_clientid: Option<String>,
-        from_username: Option<String>,
-        dup: bool,
-        retain: bool,
-        qos: u8,
-        topic: String,
-        packet_id: Option<String>,
-        payload: String,
-        ts: i64,
-        time: String,
-    },
-    MessageDelivered {
-        from_node: Option<i64>,
-        from_ipaddress: Option<String>,
-        from_clientid: Option<String>,
-        from_username: Option<String>,
-        node: i64,
-        ipaddress: String,
-        clientid: String,
-        username: String,
-        dup: bool,
-        retain: bool,
-        qos: u8,
-        topic: String,
-        packet_id: Option<String>,
-        payload: String,
-        pts: i64,
-        ts: i64,
-        time: String,
-    },
-    MessageAcked {
-        from_node: Option<i64>,
-        from_ipaddress: Option<String>,
-        from_clientid: Option<String>,
-        from_username: Option<String>,
-        node: i64,
-        ipaddress: String,
-        clientid: String,
-        username: String,
-        dup: bool,
-        retain: bool,
-        qos: u8,
-        topic: String,
-        packet_id: Option<String>,
-        payload: String,
-        pts: i64,
-        ts: i64,
-        time: String,
-    },
-    MessageDropped {
-        from_node: Option<i64>,
-        from_ipaddress: Option<String>,
-        from_clientid: Option<String>,
-        from_username: Option<String>,
-        node: Option<i64>,
-        ipaddress: Option<String>,
-        clientid: Option<String>,
-        username: Option<String>,
-        dup: bool,
-        retain: bool,
-        qos: u8,
-        topic: String,
-        packet_id: Option<String>,
-        payload: String,
-        reason: String,
-        pts: i64,
-        ts: i64,
-        time: String,
-    },
-    OfflineMessage {
-        from_node: Option<i64>,
-        from_ipaddress: Option<String>,
-        from_clientid: Option<String>,
-        from_username: Option<String>,
-        node: Option<i64>,
-        ipaddress: Option<String>,
-        clientid: Option<String>,
-        username: Option<String>,
-        dup: Option<bool>,
-        retain: Option<bool>,
-        qos: Option<u8>,
-        topic: String,
-        packet_id: Option<serde_json::Value>,
-        payload: String,
-        pts: Option<i64>,
-        ts: Option<i64>,
-        time: Option<String>,
-    },
-    #[serde(other)]
-    Unknown,
-}
 
 pub async fn handle_offline_message(
     State(state): State<AppState>,
     body: Bytes,
 ) -> impl IntoResponse {
-    let payload: WebhookPayload = match serde_json::from_slice(&body) {
+    let payload: WebhookPayloadReq = match serde_json::from_slice(&body) {
         Ok(p) => p,
         Err(e) => {
             tracing::error!("Failed to deserialize webhook payload: {}", e);
@@ -230,7 +33,7 @@ pub async fn handle_offline_message(
         }
     };
 
-    if let WebhookPayload::OfflineMessage {
+    if let WebhookPayloadReq::OfflineMessage {
         topic,
         payload: msg_payload,
         ..
@@ -270,7 +73,7 @@ pub async fn handle_offline_message(
             // 1. Fetch recipient's device record to resolve push token
             match get_item(&state, &pk, &sk).await {
                 Ok(Some(item)) => {
-                    let device = crate::models::device::Device::from(item);
+                    let device = crate::models::db::device::Device::from(item);
 
                     // 2. Dispatch data-only wake-up push (no ciphertext forwarded)
                     if let Some(push_token) = device.push_token() {

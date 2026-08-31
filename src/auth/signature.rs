@@ -3,9 +3,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
     crypto::verify_signature,
-    db::{keys::user_pk, primary::get_item},
+    db::{keys::user_pk, lib::get_item},
     error::AppError,
-    models::profile::Profile,
+    models::db::profile::Profile,
     state::AppState,
 };
 

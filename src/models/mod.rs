@@ -1,3 +1,2 @@
-pub mod device;
-pub mod profile;
-pub mod temp_registration;
+pub mod api;
+pub mod db;

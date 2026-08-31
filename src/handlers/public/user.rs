@@ -1,50 +1,35 @@
 use axum::{extract::State, Json};
-use serde::{Deserialize, Serialize};
+
 use uuid::Uuid;
 
 use crate::{
     auth::signature::AuthenticatedUser,
-    db::primary::{delete_user_account, put_user_report},
+    db::user::{delete_user_account, put_user_report},
     error::AppError,
     state::AppState,
 };
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReportUserRequest {
-    pub reported_user_id: String,
-    pub reason: String,
-    #[serde(default)]
-    pub messages: Vec<ReportedMessage>,
-}
-
-#[derive(Deserialize, Serialize, Clone)]
-pub struct ReportedMessage {
-    pub id: String,
-    pub content: String,
-    pub sender_id: String,
-    pub created_at: u64,
-}
+use crate::models::api::user::{DeleteAccountResp, ReportUserReq, ReportUserResp};
 
 pub async fn delete_account(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<DeleteAccountResp>, AppError> {
     delete_user_account(&state, &auth_user.user_id).await?;
 
     tracing::info!(user_id = %auth_user.user_id, "User account deleted successfully");
 
-    Ok(Json(serde_json::json!({
-        "status": "success",
-        "message": "Account deleted",
-    })))
+    Ok(Json(DeleteAccountResp {
+        status: "success".to_string(),
+        message: "Account deleted".to_string(),
+    }))
 }
 
 pub async fn report_user(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
-    Json(req): Json<ReportUserRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
+    Json(req): Json<ReportUserReq>,
+) -> Result<Json<ReportUserResp>, AppError> {
     let parsed_uuid = Uuid::parse_str(&req.reported_user_id).map_err(|_| {
         AppError::BadRequest("Invalid reportedUserId format: must be UUID".to_string())
     })?;
@@ -90,10 +75,10 @@ pub async fn report_user(
         "User abuse report submitted"
     );
 
-    Ok(Json(serde_json::json!({
-        "status": "success",
-        "reportId": report_id,
-    })))
+    Ok(Json(ReportUserResp {
+        status: "success".to_string(),
+        report_id,
+    }))
 }
 
 #[cfg(test)]
@@ -115,8 +100,8 @@ mod tests {
             ]
         }"#;
 
-        let req: ReportUserRequest =
-            serde_json::from_str(json_str).expect("should deserialize ReportUserRequest");
+        let req: ReportUserReq =
+            serde_json::from_str(json_str).expect("should deserialize ReportUserReq");
         assert_eq!(req.reported_user_id, "c4b12d59-8f0a-4a27-a57e-399a0937a012");
         assert_eq!(req.reason, "Harassment / Spam / Abuse");
         assert_eq!(req.messages.len(), 1);
