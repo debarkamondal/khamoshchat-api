@@ -280,10 +280,12 @@ pub async fn register_device(
 
         if phone_changed {
             if let Some(ref old) = old_phone {
-                if !old.trim().is_empty() {
+                let old_pk = phone_lookup_pk(old);
+                let new_pk = phone_lookup_pk(&req.phone);
+                if !old.trim().is_empty() && old_pk != new_pk {
                     let delete_old_phone_ptr = Delete::builder()
                         .table_name(&state.primary_table)
-                        .key("pk", AttributeValue::S(phone_lookup_pk(old)))
+                        .key("pk", AttributeValue::S(old_pk))
                         .key("sk", AttributeValue::S(lookup_sk().to_string()))
                         .build()
                         .map_err(|e| {

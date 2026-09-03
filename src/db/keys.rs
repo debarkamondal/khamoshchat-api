@@ -18,18 +18,8 @@ pub fn email_lookup_pk(email: &str) -> String {
     format!("EMAIL#{}", email.to_lowercase().trim())
 }
 
-pub fn normalize_phone(phone: &str) -> String {
-    let digits: String = phone.chars().filter(|c| c.is_ascii_digit()).collect();
-    let no_leading_zeros = digits.trim_start_matches('0');
-    if no_leading_zeros.len() > 10 {
-        no_leading_zeros[no_leading_zeros.len() - 10..].to_string()
-    } else {
-        no_leading_zeros.to_string()
-    }
-}
-
 pub fn phone_lookup_pk(phone: &str) -> String {
-    format!("PHONE#{}", normalize_phone(phone))
+    format!("PHONE#{}", phone.trim())
 }
 
 pub fn lookup_sk() -> &'static str {
@@ -74,8 +64,8 @@ mod tests {
 
     #[test]
     fn test_phone_lookup_pk() {
-        assert_eq!(phone_lookup_pk("  +1234567890  "), "PHONE#1234567890");
-        assert_eq!(phone_lookup_pk("  +44 7123 456789  "), "PHONE#7123456789");
+        assert_eq!(phone_lookup_pk("  +1234567890  "), "PHONE#+1234567890");
+        assert_eq!(phone_lookup_pk("  +447123456789  "), "PHONE#+447123456789");
     }
 
     #[test]

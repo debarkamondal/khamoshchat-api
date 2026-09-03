@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-09-03
+
+### Fixed
+- **DynamoDB Transaction Collision During Device Re-Registration**: Resolved `ValidationException: Transaction request cannot include multiple operations on one item` in `/register/device`. When an existing user re-registered, mismatched raw phone strings previously queued both a `Delete` and a `Put` for the exact same pointer item in a single `transact_write_items` call. Added a strict key inequality guard (`old_pk != new_pk`) so duplicate operations can never be sent in the same transaction.
+
+### Changed
+- **Simplified Phone Pointer Keys**: Removed custom truncation heuristics (`normalize_phone`) on the backend. `phone_lookup_pk` now stores and queries exact canonical phone keys (`PHONE#{phone}`), delegating international E.164 normalization cleanly to client applications.
+
+---
+
 ## [0.5.5] - 2026-08-31
 
 ### Added
